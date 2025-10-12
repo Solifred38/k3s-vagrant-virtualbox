@@ -1,0 +1,1 @@
+vagrant provision --provision-with cluster-k3s,helm,metallb-install,metallb-config

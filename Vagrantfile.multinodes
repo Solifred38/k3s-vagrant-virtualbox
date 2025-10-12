@@ -1,0 +1,348 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+require 'rbconfig'
+
+# 🔍 Détection IP réelle sur Windows
+def detect_real_ip_windows
+  output = `ipconfig`.force_encoding("IBM437").encode("UTF-8", invalid: :replace, undef: :replace, replace: '')
+  lines = output.lines.map(&:strip)
+
+  lines.each do |line|
+    clean = line.encode('ASCII', invalid: :replace, undef: :replace, replace: '').gsub(/\s+/, ' ')
+    if clean =~ /Adresse IPv4.*?: (\d+\.\d+\.\d+\.\d+)/
+      ip = $1
+      return ip if ip.start_with?('192.168.10.') || ip.start_with?('192.168.1.')
+    end
+  end
+
+  nil
+end
+
+# 🔍 Détection IP sur Linux/macOS
+def detect_real_ip_unix
+  `ip route get 1.1.1.1`.match(/src (\d+\.\d+\.\d+\.\d+)/)&.captures&.first
+end
+
+# 🔍 Détection universelle
+def detect_real_ip
+  if RbConfig::CONFIG['host_os'] =~ /mswin|mingw|cygwin/
+    detect_real_ip_windows
+  else
+    detect_real_ip_unix
+  end
+end
+
+# 🧠 Déduction du préfixe réseau
+def network_prefix
+  ip = detect_real_ip
+  return '192.168.10' if ip&.start_with?('192.168.10.')
+  return '192.168.1'  if ip&.start_with?('192.168.1.')
+  '192.168.10' # fallback
+end
+
+# 📦 IPs dynamiques
+server_ip = "#{network_prefix}.100"
+load_balancer_range = "#{network_prefix}.240-#{network_prefix}.250"
+
+
+# agents = { "agent1" => "192.168.10.101",
+#            "agent2" => "192.168.10.102" }
+agents = { "agent1" => "#{network_prefix}.101"}
+
+# Extra parameters in INSTALL_K3S_EXEC variable because of
+# K3s picking up the wrong interface when starting server and agent
+# https://github.com/alexellis/k3sup/issues/306
+
+server_script = <<-SHELL
+    sudo -i
+    apk update
+    apk add bash curl coreutils sudo openrc iproute2 e2fsprogs tcpdump wget tar
+ 
+    if [ -f /usr/local/bin/k3s-uninstall.sh ]; then
+      /usr/local/bin/k3s-uninstall.sh
+    fi
+    export INSTALL_K3S_EXEC="--bind-address=#{server_ip} --node-external-ip=#{server_ip} --flannel-iface=eth1"
+    curl -sfL https://get.k3s.io | sh -
+    while [ ! -f /var/lib/rancher/k3s/server/token ]; do
+      echo "Sleeping for 2 seconds to wait for k3s to start"
+      sleep 2
+    done
+    sudo chown vagrant:vagrant /etc/rancher/k3s/k3s.yaml
+    echo 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml' >> /etc/profile
+    
+    sudo cp /var/lib/rancher/k3s/server/token /vagrant_shared
+    sudo chmod +r /etc/rancher/k3s/k3s.yaml
+
+    sudo cp /etc/rancher/k3s/k3s.yaml /vagrant_shared
+    # petit alias 
+    echo "alias k=kubectl" >> /home/vagrant/.bashrc
+    echo 'if [ -f ~/.bashrc ]; then source ~/.bashrc; fi' >> /home/vagrant/.profile
+    chown vagrant:vagrant /home/vagrant/.bashrc /home/vagrant/.profile
+   
+SHELL
+
+agent_script = <<-SHELL
+    sudo -i
+    apk add curl
+    if [ -f /usr/local/bin/k3s-agent-uninstall.sh ]; then
+      /usr/local/bin/k3s-agent-uninstall.sh
+    fi
+    export K3S_TOKEN_FILE=/vagrant_shared/token
+    export K3S_URL=https://#{server_ip}:6443
+    export INSTALL_K3S_EXEC="--flannel-iface=eth1"
+    curl -sfL https://get.k3s.io | sh -
+SHELL
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "generic/alpine319"
+
+  config.vm.define "server", primary: true do |server|
+    server.vm.network "public_network", ip: server_ip
+    
+    server.vm.synced_folder "./shared", "/vagrant_shared"
+    server.vm.hostname = "server"
+    server.vm.provider "virtualbox" do |vb|
+      vb.memory = "4096"
+      vb.cpus = "2"
+    end
+    server.vm.provision "cluster-k3s", type: "shell", inline: server_script
+    # server.vm.provision "taint",type: "shell", inline: <<-SHELL 
+    # #!/bin/bash
+    #   NODE_NAME="server"
+    #   echo "⏳ Attente de la création du nœud '$NODE_NAME'..."
+    #   # Boucle jusqu'à ce que le nœud apparaisse
+    #   while true; do
+    #     if kubectl get nodes | grep -w "$NODE_NAME" > /dev/null; then
+    #       echo "✅ Nœud '$NODE_NAME' détecté. Application du taint..."
+    #       kubectl taint nodes "$NODE_NAME" node-role.kubernetes.io/master=true:NoSchedule
+    #       break
+    #     else
+    #       sleep 2
+    #     fi
+    #   done
+    # SHELL
+    
+
+    server.vm.provision "helm", type: "shell", inline: <<-SHELL
+    #!/bin/bash
+     # installation helm
+    echo "installation helm"
+    apk add git
+    sudo curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    chmod 700 get_helm.sh
+    ./get_helm.sh
+    SHELL
+
+    server.vm.provision "metallb-install", type: "shell", inline: <<-SHELL
+    # re creation du namespace vierge après suppression de son contenu
+	if kubectl get namespace metallb-system &> /dev/null; then
+  		kubectl delete namespace metallb-system
+	fi
+  helm repo add metallb https://metallb.github.io/metallb
+  helm repo update
+
+kubectl create namespace metallb-system
+
+helm install metallb metallb/metallb -n metallb-system
+until kubectl get endpointslices -n metallb-system \
+  -l kubernetes.io/service-name=metallb-webhook-service \
+  -o jsonpath='{.items[*].endpoints[*].addresses[*]}' | grep -q .; do
+  echo "⏳ En attente du webhook MetalLB via EndpointSlice..."
+  sleep 10
+done
+kubectl get pods -n metallb-system -o wide
+SHELL
+server.vm.provision "metallb-config", type: "shell", inline: <<-SHELL
+    
+    # kubectl -n metallb-system patch daemonset metallb-speaker \
+    #   --type='merge' \
+    #   -p '{"spec":{"template":{"spec":{"nodeSelector":{"metallb-speaker":"true"}}}}}' || true
+kubectl wait --namespace metallb-system \
+  --for=condition=Ready pod \
+  --selector=app.kubernetes.io/component=controller \
+  --timeout=60s
+sudo echo "apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: my-ip-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - #{load_balancer_range}
+
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: l2-advertisement
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - my-ip-pool">metallb-config.yaml
+
+kubectl apply -f metallb-config.yaml
+SHELL
+
+server.vm.provision "jenkins", type: "shell", inline: <<-SHELL
+  if kubectl get namespace jenkins &> /dev/null; then
+        kubectl delete namespace jenkins
+  fi
+   kubectl create namespace jenkins || true
+
+    cat <<EOF | kubectl apply -f -
+  apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: jenkins-pvc
+    namespace: jenkins
+  spec:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 2Gi
+EOF
+
+    cat <<EOF > /tmp/jenkins-values.yaml
+controller:
+  serviceType: LoadBalancer
+  servicePort: 8080
+  admin:
+    username: admin
+    password: monmotdepassefort
+  serviceAnnotations:
+    metallb.universe.tf/address-pool: "my-ip-pool"
+  startupProbe:
+    enabled: false
+
+persistence:
+  enabled: true
+  existingClaim: jenkins-pvc
+  mountPath: /var/jenkins_home
+EOF
+
+    helm repo add jenkins https://charts.jenkins.io
+    helm repo update
+    helm install myjenkins jenkins/jenkins --namespace jenkins -f /tmp/jenkins-values.yaml || true
+echo "adresse de jenkins : "
+IPJENKINS=$(kubectl get svc myjenkins -n jenkins \
+  -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+echo "http://${IPJENKINS}:8080"
+# attente que le pod jenkins soit pret
+
+# Nom du pod et namespace (à adapter si besoin)
+POD_NAME="myjenkins-0"
+NAMESPACE="jenkins"
+
+echo "⏳ Attente que le pod $POD_NAME soit complètement prêt..."
+
+# Vérifie d'abord que le pod existe
+while ! kubectl get pod "$POD_NAME" -n "$NAMESPACE" &>/dev/null; do
+  echo "🔍 En attente que le pod $POD_NAME soit créé..."
+  sleep 5
+done
+
+# Boucle jusqu’à ce que le pod soit Ready
+while true; do
+  STATUS=$(kubectl get pod "$POD_NAME" -n "$NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+
+  if [[ "$STATUS" == "True" ]]; then
+    echo "✅ Le pod $POD_NAME est prêt !"
+    break
+  else
+    PHASE=$(kubectl get pod "$POD_NAME" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null)
+    echo "🔄 Pod en phase : $PHASE (attente 5s)"
+    sleep 5
+  fi
+done
+
+
+# # Vérifie le statut Ready
+#   READY_STATUS=$(kubectl get pod myjenkins-0 -n jenkins -o jsonpath="{.status.containerStatuses[*].ready}")
+#   READY_COUNT=$(kubectl get pod myjenkins-0 -n jenkins -o jsonpath="{.status.containerStatuses[*].name}" | wc -w)
+
+#   echo "READY_STATUS=${READY_STATUS}"
+#   echo "READY_COUNT=${READY_COUNT}"
+#   READY_TRUE_COUNT=$(echo "$READY_STATUS" | grep -o "true" | wc -l)
+#   echo "READY_TRUE_COUNT=${READY_TRUE_COUNT}"
+#   if [ "$READY_TRUE_COUNT" -eq "$READY_COUNT" ]; then
+#     echo "✅ Pod Jenkins  est prêt ($READY_TRUE_COUNT/$READY_COUNT)"
+#     break
+#   else
+#     echo "⏳ Pod '$POD_NAME' pas encore prêt ($READY_TRUE_COUNT/$READY_COUNT)..."
+#     sleep 5
+#   fi
+
+SHELL
+
+server.vm.provision "dashboard", type: "shell", inline: <<-SHELL
+
+# initialisation si nécessaire
+if kubectl get namespace kubernetes-dashboard &> /dev/null; then
+        kubectl delete namespace kubernetes-dashboard
+  fi
+echo "installation dashboard"
+
+helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/
+helm repo update
+
+echo "creation namespace"
+kubectl create namespace kubernetes-dashboard
+
+helm install dashboard kubernetes-dashboard/kubernetes-dashboard \
+  --namespace kubernetes-dashboard \
+  --set kubernetesDashboard.service.type=LoadBalancer
+echo "creation d'un compte admin"
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
+
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: admin-user
+  namespace: kubernetes-dashboard
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: admin-user
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: admin-user
+  namespace: kubernetes-dashboard
+EOF
+
+kubectl -n kubernetes-dashboard create token admin-user
+
+echo "\n"
+# des fois çà marche pas il faut patcher
+kubectl patch svc dashboard-kong-proxy -n kubernetes-dashboard \
+  -p '{"spec": {"type": "LoadBalancer"}}'
+
+echo "adresse du dashboard: "
+IPDASH=$(kubectl get svc dashboard-kong-proxy -n kubernetes-dashboard \
+  -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+
+echo "https://${IPDASH}"
+
+SHELL
+
+  end
+  agents.each do |agent_name, agent_ip|
+    config.vm.define agent_name do |agent|
+      agent.vm.network "public_network", ip: agent_ip
+      agent.vm.synced_folder "./shared", "/vagrant_shared"
+      agent.vm.hostname = agent_name
+      agent.vm.provider "virtualbox" do |vb|
+        vb.memory = "4096"
+        vb.cpus = "2"
+      end
+      agent.vm.provision "cluster-k3s", type: "shell", inline: agent_script
+    end
+  end
+end

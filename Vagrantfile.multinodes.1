@@ -1,0 +1,101 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+server_ip = "192.168.1.200"
+
+agents = { "agent1" => "192.168.1.201",
+           "agent2" => "192.168.1.202" }
+# agents = { "agent1" => "192.168.1.201"}
+
+# Extra parameters in INSTALL_K3S_EXEC variable because of
+# K3s picking up the wrong interface when starting server and agent
+# https://github.com/alexellis/k3sup/issues/306
+
+server_script = <<-SHELL
+    sudo -i
+    apk add curl
+    if [ -f /usr/local/bin/k3s-uninstall.sh ]; then
+      /usr/local/bin/k3s-uninstall.sh
+    fi
+    export INSTALL_K3S_EXEC="--bind-address=#{server_ip} --node-external-ip=#{server_ip} --flannel-iface=eth1"
+    curl -sfL https://get.k3s.io | sh -
+    while [ ! -f /var/lib/rancher/k3s/server/token ]; do
+      echo "Sleeping for 2 seconds to wait for k3s to start"
+      sleep 2
+    done
+    sudo chown vagrant:vagrant /etc/rancher/k3s/k3s.yaml
+    echo 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml' >> /etc/profile
+    
+    sudo cp /var/lib/rancher/k3s/server/token /vagrant_shared
+    sudo chmod +r /etc/rancher/k3s/k3s.yaml
+
+    sudo cp /etc/rancher/k3s/k3s.yaml /vagrant_shared
+    # petit alias 
+    echo "alias k=kubectl" >> /home/vagrant/.bashrc
+    echo 'if [ -f ~/.bashrc ]; then source ~/.bashrc; fi' >> /home/vagrant/.profile
+    chown vagrant:vagrant /home/vagrant/.bashrc /home/vagrant/.profile
+    # installation helm
+    echo "installation helm"
+    apk add git
+    sudo curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    chmod 700 get_helm.sh
+    ./get_helm.sh
+SHELL
+
+agent_script = <<-SHELL
+    sudo -i
+    apk add curl
+    if [ -f /usr/local/bin/k3s-agent-uninstall.sh ]; then
+      /usr/local/bin/k3s-agent-uninstall.sh
+    fi
+    export K3S_TOKEN_FILE=/vagrant_shared/token
+    export K3S_URL=https://#{server_ip}:6443
+    export INSTALL_K3S_EXEC="--flannel-iface=eth1"
+    curl -sfL https://get.k3s.io | sh -
+SHELL
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "generic/alpine319"
+
+  config.vm.define "server", primary: true do |server|
+    server.vm.network "public_network", ip: server_ip
+    (30000..30010).each do |port|
+        server.vm.network "forwarded_port", guest: port, host: port, auto_correct: true
+    end
+    server.vm.network "forwarded_port", guest: 8080, host: 8080, auto_correct: true
+    server.vm.synced_folder "./shared", "/vagrant_shared"
+    server.vm.hostname = "server"
+    server.vm.provider "virtualbox" do |vb|
+      vb.memory = "2048"
+      vb.cpus = "2"
+    end
+    server.vm.provision "shell", inline: server_script
+    server.vm.provision "shell", inline: <<-SHELL 
+    #!/bin/bash
+      NODE_NAME="server"
+      echo "⏳ Attente de la création du nœud '$NODE_NAME'..."
+      # Boucle jusqu'à ce que le nœud apparaisse
+      while true; do
+        if kubectl get nodes | grep -w "$NODE_NAME" > /dev/null; then
+          echo "✅ Nœud '$NODE_NAME' détecté. Application du taint..."
+          kubectl taint nodes "$NODE_NAME" node-role.kubernetes.io/master=true:NoSchedule
+          break
+        else
+          sleep 2
+        fi
+      done
+    SHELL
+  end
+  agents.each do |agent_name, agent_ip|
+    config.vm.define agent_name do |agent|
+      agent.vm.network "public_network", ip: agent_ip
+      agent.vm.synced_folder "./shared", "/vagrant_shared"
+      agent.vm.hostname = agent_name
+      agent.vm.provider "virtualbox" do |vb|
+        vb.memory = "4096"
+        vb.cpus = "2"
+      end
+      agent.vm.provision "shell", inline: agent_script
+    end
+  end
+end
