@@ -49,7 +49,7 @@ load_balancer_range = "#{network_prefix}.240-#{network_prefix}.250"
 # agents = { "agent1" => "192.168.10.101",
 #            "agent2" => "192.168.10.102" }
 agents = { "agent1" => "#{network_prefix}.101"}
-
+# agents = {}
 # Extra parameters in INSTALL_K3S_EXEC variable because of
 # K3s picking up the wrong interface when starting server and agent
 # https://github.com/alexellis/k3sup/issues/306
@@ -103,7 +103,7 @@ Vagrant.configure("2") do |config|
     server.vm.synced_folder "./shared", "/vagrant_shared"
     server.vm.hostname = "server"
     server.vm.provider "virtualbox" do |vb|
-      vb.memory = "4096"
+      vb.memory = "12000"
       vb.cpus = "2"
     end
     server.vm.provision "cluster-k3s", type: "shell", inline: server_script
@@ -257,24 +257,29 @@ while true; do
   fi
 done
 
-
-# # Vérifie le statut Ready
-#   READY_STATUS=$(kubectl get pod myjenkins-0 -n jenkins -o jsonpath="{.status.containerStatuses[*].ready}")
-#   READY_COUNT=$(kubectl get pod myjenkins-0 -n jenkins -o jsonpath="{.status.containerStatuses[*].name}" | wc -w)
-
-#   echo "READY_STATUS=${READY_STATUS}"
-#   echo "READY_COUNT=${READY_COUNT}"
-#   READY_TRUE_COUNT=$(echo "$READY_STATUS" | grep -o "true" | wc -l)
-#   echo "READY_TRUE_COUNT=${READY_TRUE_COUNT}"
-#   if [ "$READY_TRUE_COUNT" -eq "$READY_COUNT" ]; then
-#     echo "✅ Pod Jenkins  est prêt ($READY_TRUE_COUNT/$READY_COUNT)"
-#     break
-#   else
-#     echo "⏳ Pod '$POD_NAME' pas encore prêt ($READY_TRUE_COUNT/$READY_COUNT)..."
-#     sleep 5
-#   fi
-
 SHELL
+
+
+server.vm.provision "elk", type: "shell", inline: <<-SHELL
+
+  # if kubectl get namespace elk &> /dev/null; then
+  #         kubectl delete namespace elk
+  #   fi
+  # kubectl create namespace elk || true
+  helm uninstall elasticsearch
+  helm repo add elastic https://helm.elastic.co
+  helm repo update
+  helm install elasticsearch elastic/elasticsearch  -f /vagrant_shared/values-elasticsearch.yaml
+SHELL
+
+
+# server.vm.provision "ssh-key", type: "shell", inline: <<-SHELL
+#   #creation d'une clé ssh
+#   ssh-keygen -f /vagrant_shared/ssh -N "" -q
+#   # introduction d'une clé publique pour connexion ssh plus facile
+#   cat /vagrant_shared/ssh.pub >> .ssh/authorized_keys
+
+# SHELL
 
 server.vm.provision "dashboard", type: "shell", inline: <<-SHELL
 
@@ -339,7 +344,7 @@ SHELL
       agent.vm.synced_folder "./shared", "/vagrant_shared"
       agent.vm.hostname = agent_name
       agent.vm.provider "virtualbox" do |vb|
-        vb.memory = "4096"
+        vb.memory = "8000"
         vb.cpus = "2"
       end
       agent.vm.provision "cluster-k3s", type: "shell", inline: agent_script

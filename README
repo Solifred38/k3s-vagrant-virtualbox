@@ -1,0 +1,9 @@
+Script simple pour créer un cluster k3s multinodes avec plusieurs vms virtualbox en utilisant vagrant. Il suffit de lancer le script start-cluster.ps1 après avoir installé virtualbox et vagrant sous windows. les vm se créent automatiquement et se connectent au cluster.
+On peut connecter des machines distantes au cluster si elles sont sur le meme réseau
+
+pour se connecter au server et utiliser kubectl : 
+"vagrant ssh server"
+
+on utilise ensuite les commandes kubectl pour controler le cluster k3s.
+le répertoire partagé entre l'hote et le serveur est /vagrant_shared coté vm serveur et shared coté hote.
+Le cluster K3s est installé sur une VM alpine319.

@@ -1,0 +1,49 @@
+replicas: 1
+minimumMasterNodes: 1
+
+nodeGroup: "master"
+roles:
+  - master
+  - data
+  - ingest
+
+volumeClaimTemplate:
+  accessModes: [ "ReadWriteOnce" ]
+  storageClassName: "local-path"
+  resources:
+    requests:
+      storage: 5Gi
+
+resources:
+  requests:
+    cpu: "500m"
+    memory: "2Gi"
+  limits:
+    cpu: "1"
+    memory: "4Gi"
+
+esJavaOpts: "-Xms1g -Xmx1g"
+
+sysctlInitContainer:
+  enabled: true
+  privileged: true
+
+securityContext:
+  runAsUser: 0
+  privileged: true
+
+extraEnvs:
+  - name: ES_BOOTSTRAP_CHECKS
+    value: "false"
+
+esConfig:
+  elasticsearch.yml: |
+    bootstrap.memory_lock: false
+    discovery.type: single-node
+    node.name: elasticsearch-master-0
+    network.host: 0.0.0.0
+    xpack.security.enabled: false
+    xpack.ml.enabled: false
+    path.logs: /usr/share/elasticsearch/logs
+    path.data: /usr/share/elasticsearch/data
+    
