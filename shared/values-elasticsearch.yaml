@@ -17,33 +17,32 @@ volumeClaimTemplate:
 resources:
   requests:
     cpu: "500m"
-    memory: "2Gi"
+    memory: "1Gi"
   limits:
     cpu: "1"
-    memory: "4Gi"
+    memory: "2Gi"
 
-esJavaOpts: "-Xms1g -Xmx1g"
+esJavaOpts: "-Xms512m -Xmx512m"
 
+# PAS de readinessProbe → évite les erreurs de validation
+readinessProbe: {}
+
+# PAS d’initContainer → évite les erreurs de sécurité
 sysctlInitContainer:
-  enabled: true
-  privileged: true
+  enabled: false
 
+# Compatible avec PodSecurityAdmission
 securityContext:
-  runAsUser: 0
-  privileged: true
-
-extraEnvs:
-  - name: ES_BOOTSTRAP_CHECKS
-    value: "false"
+  runAsNonRoot: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
 
 esConfig:
   elasticsearch.yml: |
-    bootstrap.memory_lock: false
     discovery.type: single-node
-    node.name: elasticsearch-master-0
-    network.host: 0.0.0.0
     xpack.security.enabled: false
     xpack.ml.enabled: false
-    path.logs: /usr/share/elasticsearch/logs
-    path.data: /usr/share/elasticsearch/data
-    
+    bootstrap.memory_lock: false
+    bootstrap.system_call_filter: false
+    network.host: 0.0.0.0
