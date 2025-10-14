@@ -273,14 +273,6 @@ server.vm.provision "elk", type: "shell", inline: <<-SHELL
 SHELL
 
 
-# server.vm.provision "ssh-key", type: "shell", inline: <<-SHELL
-#   #creation d'une clé ssh
-#   ssh-keygen -f /vagrant_shared/ssh -N "" -q
-#   # introduction d'une clé publique pour connexion ssh plus facile
-#   cat /vagrant_shared/ssh.pub >> .ssh/authorized_keys
-
-# SHELL
-
 server.vm.provision "dashboard", type: "shell", inline: <<-SHELL
 
 # initialisation si nécessaire
