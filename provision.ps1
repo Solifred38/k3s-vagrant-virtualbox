@@ -38,9 +38,9 @@ $command = "vagrant provision --provision-with $provisionerList"
 
 Write-Host "`nCommande générée :" -ForegroundColor Green
 Write-Host $command
-
+# Initialisation à o par défaut
 # Exécution ?
 $run = Read-Host "`nSouhaitez-vous exécuter cette commande ? (o/n)"
-if ($run -eq "o") {
+if ($run -ne "n") {
     Invoke-Expression $command
 }

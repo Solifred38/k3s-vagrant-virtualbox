@@ -43,13 +43,13 @@ end
 
 # 📦 IPs dynamiques
 server_ip = "#{network_prefix}.100"
-load_balancer_range = "#{network_prefix}.240-#{network_prefix}.250"
+load_balancer_range = "#{network_prefix}.150-#{network_prefix}.250"
 
 
 # agents = { "agent1" => "192.168.10.101",
 #            "agent2" => "192.168.10.102" }
-agents = { "agent1" => "#{network_prefix}.101"}
-# agents = {}
+# agents = { "agent1" => "#{network_prefix}.101"}
+agents = {}
 # Extra parameters in INSTALL_K3S_EXEC variable because of
 # K3s picking up the wrong interface when starting server and agent
 # https://github.com/alexellis/k3sup/issues/306
@@ -158,6 +158,7 @@ server.vm.provision "metallb-config", type: "shell", inline: <<-SHELL
     # kubectl -n metallb-system patch daemonset metallb-speaker \
     #   --type='merge' \
     #   -p '{"spec":{"template":{"spec":{"nodeSelector":{"metallb-speaker":"true"}}}}}' || true
+echo "echelle des adresses : #{load_balancer_range}"
 kubectl wait --namespace metallb-system \
   --for=condition=Ready pod \
   --selector=app.kubernetes.io/component=controller \
