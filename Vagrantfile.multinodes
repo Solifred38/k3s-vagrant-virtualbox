@@ -139,31 +139,22 @@ Vagrant.configure("2") do |config|
 	if kubectl get namespace metallb-system &> /dev/null; then
   		kubectl delete namespace metallb-system
 	fi
-  helm repo add metallb https://metallb.github.io/metallb
-  helm repo update
+kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.8/config/manifests/metallb-native.yaml
 
-kubectl create namespace metallb-system
-
-helm install metallb metallb/metallb -n metallb-system
-until kubectl get endpointslices -n metallb-system \
-  -l kubernetes.io/service-name=metallb-webhook-service \
-  -o jsonpath='{.items[*].endpoints[*].addresses[*]}' | grep -q .; do
-  echo "⏳ En attente du webhook MetalLB via EndpointSlice..."
-  sleep 10
-done
 kubectl get pods -n metallb-system -o wide
 SHELL
 server.vm.provision "metallb-config", type: "shell", inline: <<-SHELL
     
-    # kubectl -n metallb-system patch daemonset metallb-speaker \
-    #   --type='merge' \
-    #   -p '{"spec":{"template":{"spec":{"nodeSelector":{"metallb-speaker":"true"}}}}}' || true
+    kubectl -n metallb-system patch daemonset speaker \
+  --type='json' \
+  -p='[{"op": "remove", "path": "/spec/template/spec/nodeSelector/speaker"}]'|| true
 echo "echelle des adresses : #{load_balancer_range}"
 kubectl wait --namespace metallb-system \
   --for=condition=Ready pod \
-  --selector=app.kubernetes.io/component=controller \
-  --timeout=60s
-sudo echo "apiVersion: metallb.io/v1beta1
+  --all --timeout=60s
+
+  kubectl apply -f - <<'EOF'
+apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
   name: my-ip-pool
@@ -180,9 +171,8 @@ metadata:
   namespace: metallb-system
 spec:
   ipAddressPools:
-  - my-ip-pool">metallb-config.yaml
-
-kubectl apply -f metallb-config.yaml
+  - my-ip-pool
+EOF
 SHELL
 
 server.vm.provision "jenkins", type: "shell", inline: <<-SHELL
@@ -263,31 +253,27 @@ SHELL
 
 server.vm.provision "elk", type: "shell", inline: <<-SHELL
 
-# installation d'elasticsearch
+# installation d'elasticsearch en mode loadbalancer
   kubectl apply -f - <<'EOF'
 apiVersion: v1
 kind: Service
 metadata:
   name: elasticsearch
 spec:
+  type: LoadBalancer
   selector:
     app: elasticsearch
   ports:
     - name: http
-      protocol: TCP
       port: 9200
       targetPort: 9200
-    - name: transport
-      protocol: TCP
-      port: 9300
-      targetPort: 9300
+  loadBalancerIP: 192.168.10.150
 ---
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: elasticsearch
 spec:
-  serviceName: elasticsearch
   replicas: 1
   selector:
     matchLabels:
@@ -299,43 +285,85 @@ spec:
     spec:
       containers:
         - name: elasticsearch
-          image: docker.elastic.co/elasticsearch/elasticsearch:8.5.1
+          image: docker.elastic.co/elasticsearch/elasticsearch:7.17.10
           ports:
             - containerPort: 9200
               name: http
-            - containerPort: 9300
-              name: transport
           env:
             - name: discovery.type
               value: single-node
             - name: ES_JAVA_OPTS
-              value: "-Xms512m -Xmx512m"
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-          volumeMounts:
-            - name: data
-              mountPath: /usr/share/elasticsearch/data
+              value: "-Xms256m -Xmx256m"
+            - name: network.host
+              value: "0.0.0.0"
+            - name: bootstrap.memory_lock
+              value: "false"
+            - name: xpack.security.enabled
+              value: "false"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 9200
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
           resources:
             requests:
-              memory: "1Gi"
-              cpu: "500m"
+              memory: "256Mi"
+              cpu: "100m"
             limits:
-              memory: "2Gi"
-              cpu: "1"
-  volumeClaimTemplates:
-    - metadata:
-        name: data
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        storageClassName: "local-path"
-        resources:
-          requests:
-            storage: 5Gi
-            
+              memory: "512Mi"
+              cpu: "250m"            
 EOF
-
+# installation kibana
+  kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana
+spec:
+  type: LoadBalancer
+  selector:
+    app: kibana
+  ports:
+    - name: http
+      port: 5601
+      targetPort: 5601
+  loadBalancerIP: 192.168.10.151
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kibana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kibana
+  template:
+    metadata:
+      labels:
+        app: kibana
+    spec:
+      containers:
+        - name: kibana
+          image: docker.elastic.co/kibana/kibana:7.17.10
+          ports:
+            - containerPort: 5601
+              name: http
+          env:
+            - name: ELASTICSEARCH_HOSTS
+              value: "http://elasticsearch:9200"
+            - name: SERVER_HOST
+              value: "0.0.0.0"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "250m"
+EOF
 SHELL
 
 
