@@ -46,8 +46,8 @@ server_ip = "#{network_prefix}.100"
 load_balancer_range = "#{network_prefix}.150-#{network_prefix}.250"
 
 
-# agents = { "agent1" => "192.168.10.101",
-#            "agent2" => "192.168.10.102" }
+# agents = { "agent1" => "#{network_prefix}.101",
+#            "agent2" => "#{network_prefix}.102" }
 # agents = { "agent1" => "#{network_prefix}.101"}
 agents = {}
 # Extra parameters in INSTALL_K3S_EXEC variable because of
@@ -268,7 +268,7 @@ spec:
       targetPort: 50000
       protocol: TCP
       name: agent
-  loadBalancerIP: 192.168.10.200
+  loadBalancerIP: #{network_prefix}.200
   selector:
     app: jenkins
 
@@ -324,7 +324,7 @@ spec:
     - name: http
       port: 9200
       targetPort: 9200
-  loadBalancerIP: 192.168.10.150
+  loadBalancerIP: #{network_prefix}.150
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -386,7 +386,7 @@ spec:
     - name: http
       port: 5601
       targetPort: 5601
-  loadBalancerIP: 192.168.10.151
+  loadBalancerIP: #{network_prefix}.151
 ---
 apiVersion: apps/v1
 kind: Deployment
