@@ -216,29 +216,41 @@ EOF
 
 echo " Pods + Service"
 kubectl apply -f - <<EOF
-apiVersion: v1
-kind: Pod
+apiVersion: apps/v1
+kind: StatefulSet
 metadata:
   name: jenkins
   namespace: jenkins
-  labels:
-    app: jenkins
 spec:
-  containers:
-    - name: jenkins
-      image: jenkins/jenkins:lts-jdk17
-      ports:
-        - name: http
-          containerPort: 8080
-        - name: agent
-          containerPort: 50000
-      volumeMounts:
-        - name: jenkins-data
-          mountPath: /var/jenkins_home
-  volumes:
-    - name: jenkins-data
-      persistentVolumeClaim:
-        claimName: jenkins-pvc
+  serviceName: "jenkins"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jenkins
+  template:
+    metadata:
+      labels:
+        app: jenkins
+    spec:
+      containers:
+        - name: jenkins
+          image: jenkins/jenkins:lts-jdk17
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: agent
+              containerPort: 50000
+          volumeMounts:
+            - name: jenkins-data
+              mountPath: /var/jenkins_home
+  volumeClaimTemplates:
+    - metadata:
+        name: jenkins-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
 ---
 apiVersion: v1
 kind: Service
@@ -262,13 +274,13 @@ spec:
 
 EOF
 echo "attente que le pod soit pret"
-kubectl wait --for=condition=ready pod/jenkins -n jenkins --timeout=300s
+kubectl wait --for=condition=ready pod/jenkins-0 -n jenkins --timeout=300s
 echo "✅ Le pod est prêt, vérification de la disponibilité du mot de passe..."
 # Boucle d’attente pour que Jenkins ait eu le temps de générer le mot de passe
 for i in {1..30}; do
-  if kubectl -n jenkins exec jenkins -- test -f /var/jenkins_home/secrets/initialAdminPassword 2>/dev/null; then
+  if kubectl -n jenkins exec jenkins-0 -- test -f /var/jenkins_home/secrets/initialAdminPassword 2>/dev/null; then
     echo "🔑 Fichier trouvé ! Récupération du mot de passe :"
-    kubectl -n jenkins exec jenkins -- cat /var/jenkins_home/secrets/initialAdminPassword
+    kubectl -n jenkins exec jenkins-0 -- cat /var/jenkins_home/secrets/initialAdminPassword
     break
   else
     echo "⏳ Fichier pas encore créé... tentative $i/30"
@@ -278,19 +290,22 @@ done
   SHELL
 
 server.vm.provision "backup-jenkins", type: "shell", inline: <<-SHELL
-POD_NAME="jenkins"
+POD_NAME="jenkins-0"
 NAMESPACE="jenkins"
 kubectl exec -n $NAMESPACE $POD_NAME -- tar czf - /var/jenkins_home > /vagrant_shared/backup-jenkins.tar.gz
 SHELL
 server.vm.provision "restore-jenkins", type: "shell", inline: <<-SHELL
-POD_NAME="jenkins"
+POD_NAME="jenkins-0"
 NAMESPACE="jenkins"
 echo "décompression du backup "
 echo "  kubectl exec -i -n $NAMESPACE $POD_NAME -- tar xzf - -C /var/jenkins_home < /vagrant_shared/backup-jenkins.tar.gz"
 
 kubectl exec -i -n $NAMESPACE $POD_NAME -- tar xzf - -C /var/jenkins_home < /vagrant_shared/backup-jenkins.tar.gz
   #relance de jenkins
-kubectl delete pod -n jenkins $POD
+echo "suppression du pod pour prise en compte des changements"
+kubectl delete pod -n $NAMESPACE $POD_NAME
+kubectl wait --for=condition=ready pod/$POD_NAME -n $NAMESPACE --timeout=300s
+echo "jenkins est pret"
 SHELL
 
 server.vm.provision "elk", type: "shell", inline: <<-SHELL
