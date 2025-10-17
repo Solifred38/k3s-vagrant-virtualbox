@@ -250,6 +250,21 @@ done
 
 SHELL
 
+server.vm.provision "backup-jenkins", type: "shell", inline: <<-SHELL
+POD_NAME="myjenkins-0"
+NAMESPACE="jenkins"
+kubectl exec -n $NAMESPACE $POD_NAME -- tar czf - /var/jenkins_home > /vagrant_shared/backup-jenkins.tar.gz
+SHELL
+server.vm.provision "restore-jenkins", type: "shell", inline: <<-SHELL
+POD_NAME="myjenkins-0"
+NAMESPACE="jenkins"
+echo "décompression du backup "
+echo "  kubectl exec -i -n $NAMESPACE $POD_NAME -- tar xzf - -C /var/jenkins_home < /vagrant_shared/backup-jenkins.tar.gz"
+
+kubectl exec -i -n $NAMESPACE $POD_NAME -- tar xzf - -C /var/jenkins_home < /vagrant_shared/backup-jenkins.tar.gz
+  #relance de jenkins
+kubectl delete pod -n jenkins $POD
+SHELL
 
 server.vm.provision "elk", type: "shell", inline: <<-SHELL
 
