@@ -176,87 +176,114 @@ EOF
 SHELL
 
 server.vm.provision "jenkins", type: "shell", inline: <<-SHELL
-  if kubectl get namespace jenkins &> /dev/null; then
-        kubectl delete namespace jenkins
-  fi
-   kubectl create namespace jenkins || true
+echo "entree dans installation de jenkins"
+if kubectl get namespace jenkins &> /dev/null; then
+    kubectl delete namespace jenkins
+fi
 
-    cat <<EOF | kubectl apply -f -
-  apiVersion: v1
-  kind: PersistentVolumeClaim
-  metadata:
-    name: jenkins-pvc
-    namespace: jenkins
-  spec:
-    accessModes:
-      - ReadWriteOnce
-    resources:
-      requests:
-        storage: 2Gi
+echo "=== Installation de Jenkins ==="
+kubectl create namespace jenkins || true
+
+# Volume persistant
+mkdir -p /data/jenkins
+echo "creation des volumes"
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: jenkins-pv
+  namespace: jenkins
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: /data/jenkins
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jenkins-pvc
+  namespace: jenkins
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
 EOF
 
-    cat <<EOF > /tmp/jenkins-values.yaml
-controller:
-  serviceType: LoadBalancer
-  servicePort: 8080
-  admin:
-    username: admin
-    password: monmotdepassefort
-  serviceAnnotations:
-    metallb.universe.tf/address-pool: "my-ip-pool"
-  startupProbe:
-    enabled: false
+echo " Pods + Service"
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: jenkins
+  namespace: jenkins
+  labels:
+    app: jenkins
+spec:
+  containers:
+    - name: jenkins
+      image: jenkins/jenkins:lts-jdk17
+      ports:
+        - name: http
+          containerPort: 8080
+        - name: agent
+          containerPort: 50000
+      volumeMounts:
+        - name: jenkins-data
+          mountPath: /var/jenkins_home
+  volumes:
+    - name: jenkins-data
+      persistentVolumeClaim:
+        claimName: jenkins-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jenkins
+  namespace: jenkins
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+    - port: 50000
+      targetPort: 50000
+      protocol: TCP
+      name: agent
+  loadBalancerIP: 192.168.10.200
+  selector:
+    app: jenkins
 
-persistence:
-  enabled: true
-  existingClaim: jenkins-pvc
-  mountPath: /var/jenkins_home
 EOF
-
-    helm repo add jenkins https://charts.jenkins.io
-    helm repo update
-    helm install myjenkins jenkins/jenkins --namespace jenkins -f /tmp/jenkins-values.yaml || true
-echo "adresse de jenkins : "
-IPJENKINS=$(kubectl get svc myjenkins -n jenkins \
-  -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-echo "http://${IPJENKINS}:8080"
-# attente que le pod jenkins soit pret
-
-# Nom du pod et namespace (à adapter si besoin)
-POD_NAME="myjenkins-0"
-NAMESPACE="jenkins"
-
-echo "⏳ Attente que le pod $POD_NAME soit complètement prêt..."
-
-# Vérifie d'abord que le pod existe
-while ! kubectl get pod "$POD_NAME" -n "$NAMESPACE" &>/dev/null; do
-  echo "🔍 En attente que le pod $POD_NAME soit créé..."
-  sleep 5
-done
-
-# Boucle jusqu’à ce que le pod soit Ready
-while true; do
-  STATUS=$(kubectl get pod "$POD_NAME" -n "$NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
-
-  if [[ "$STATUS" == "True" ]]; then
-    echo "✅ Le pod $POD_NAME est prêt !"
+echo "attente que le pod soit pret"
+kubectl wait --for=condition=ready pod/jenkins -n jenkins --timeout=300s
+echo "✅ Le pod est prêt, vérification de la disponibilité du mot de passe..."
+# Boucle d’attente pour que Jenkins ait eu le temps de générer le mot de passe
+for i in {1..30}; do
+  if kubectl -n jenkins exec jenkins -- test -f /var/jenkins_home/secrets/initialAdminPassword 2>/dev/null; then
+    echo "🔑 Fichier trouvé ! Récupération du mot de passe :"
+    kubectl -n jenkins exec jenkins -- cat /var/jenkins_home/secrets/initialAdminPassword
     break
   else
-    PHASE=$(kubectl get pod "$POD_NAME" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null)
-    echo "🔄 Pod en phase : $PHASE (attente 5s)"
-    sleep 5
+    echo "⏳ Fichier pas encore créé... tentative $i/30"
+    sleep 10
   fi
 done
-
-SHELL
+  SHELL
 
 server.vm.provision "backup-jenkins", type: "shell", inline: <<-SHELL
-POD_NAME="myjenkins-0"
+POD_NAME="jenkins"
 NAMESPACE="jenkins"
 kubectl exec -n $NAMESPACE $POD_NAME -- tar czf - /var/jenkins_home > /vagrant_shared/backup-jenkins.tar.gz
 SHELL
 server.vm.provision "restore-jenkins", type: "shell", inline: <<-SHELL
-POD_NAME="myjenkins-0"
+POD_NAME="jenkins"
 NAMESPACE="jenkins"
 echo "décompression du backup "
 echo "  kubectl exec -i -n $NAMESPACE $POD_NAME -- tar xzf - -C /var/jenkins_home < /vagrant_shared/backup-jenkins.tar.gz"
