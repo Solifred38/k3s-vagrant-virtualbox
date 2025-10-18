@@ -294,21 +294,12 @@ done
   SHELL
 
 server.vm.provision "backup-jenkins", type: "shell", inline: <<-SHELL
-POD_NAME="jenkins-0"
-NAMESPACE="jenkins"
-kubectl exec -n $NAMESPACE $POD_NAME -- tar czf - /var/jenkins_home > /vagrant_shared/backup-jenkins.tar.gz
+/vagrant_shared/backup-jenkins.sh
 SHELL
 server.vm.provision "restore-jenkins", type: "shell", inline: <<-SHELL
-POD_NAME="jenkins-0"
-NAMESPACE="jenkins"
-echo "décompression du backup "
-echo "  kubectl exec -i -n $NAMESPACE $POD_NAME -- tar xzf - -C /var/jenkins_home < /vagrant_shared/backup-jenkins.tar.gz"
-
-kubectl exec -i -n $NAMESPACE $POD_NAME -- tar xzf - -C /var/jenkins_home < /vagrant_shared/backup-jenkins.tar.gz
-  #relance de jenkins
-echo "suppression du pod pour prise en compte des changements"
-kubectl delete pod -n $NAMESPACE $POD_NAME
-kubectl wait --for=condition=ready pod/$POD_NAME -n $NAMESPACE --timeout=300s
+/vagrant_shared/restore-jenkins.sh
+echo "attente que le pod soit pret"
+kubectl wait --for=condition=ready pod/jenkins-0 -n jenkins --timeout=300s
 echo "jenkins est pret"
 SHELL
 
