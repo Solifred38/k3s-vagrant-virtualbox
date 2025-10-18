@@ -136,22 +136,22 @@ Vagrant.configure("2") do |config|
 
     server.vm.provision "metallb-install", type: "shell", inline: <<-SHELL
     # re creation du namespace vierge après suppression de son contenu
+  echo "suppression de l'ancien package metallb-system"
 	if kubectl get namespace metallb-system &> /dev/null; then
   		kubectl delete namespace metallb-system
 	fi
 kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.8/config/manifests/metallb-native.yaml
 
 kubectl get pods -n metallb-system -o wide
-SHELL
-server.vm.provision "metallb-config", type: "shell", inline: <<-SHELL
-    
-    kubectl -n metallb-system patch daemonset speaker \
+# configuration 
+echo "configuration du loadBalancer"
+kubectl -n metallb-system patch daemonset speaker \
   --type='json' \
   -p='[{"op": "remove", "path": "/spec/template/spec/nodeSelector/speaker"}]'|| true
 echo "echelle des adresses : #{load_balancer_range}"
 kubectl wait --namespace metallb-system \
   --for=condition=Ready pod \
-  --all --timeout=60s
+  --all --timeout=300s
 
   kubectl apply -f - <<'EOF'
 apiVersion: metallb.io/v1beta1
