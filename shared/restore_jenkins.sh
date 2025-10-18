@@ -1,19 +1,36 @@
 #!/bin/bash
-set -e
 
+# Variables
+POD_NAME="jenkins-0"
 NAMESPACE="jenkins"
-LABEL="app.kubernetes.io/name=jenkins"
-BACKUP_DIR="$1"
+BACKUP_FILE="/vagrant_shared/backup-jenkins.tar.gz"
+TMP_PATH="/tmp/backup-jenkins.tar.gz"
+TARGET_DIR="/var/jenkins_home"
 
-if [ ! -d "$BACKUP_DIR" ]; then
-  echo "❌ Répertoire de sauvegarde invalide : $BACKUP_DIR"
+# Vérification du fichier de backup
+if [ ! -f "$BACKUP_FILE" ]; then
+  echo "❌ Fichier de backup introuvable : $BACKUP_FILE"
   exit 1
 fi
 
-POD=$(kubectl get pods -n $NAMESPACE -l $LABEL -o jsonpath="{.items[0].metadata.name}")
-echo "🔁 Restauration depuis $BACKUP_DIR..."
-echo " nom du pod : $POD"
-kubectl cp "$BACKUP_DIR" "$NAMESPACE/$POD:/var/jenkins_home"
+# Copie du fichier dans le pod
+echo "📦 Copie du fichier de backup dans le pod..."
+kubectl cp "$BACKUP_FILE" "$NAMESPACE/$POD_NAME:$TMP_PATH"
 
-echo "🛑 Redémarrage propre..."
-kubectl delete pod "$POD" -n $NAMESPACE
+# Nettoyage de l'ancien contenu
+echo "🧹 Nettoyage de $TARGET_DIR..."
+kubectl exec -n "$NAMESPACE" "$POD_NAME" -- bash -c "rm -rf ${TARGET_DIR:?}/*"
+
+# Extraction du backup
+echo "📂 Extraction du backup..."
+kubectl exec -n "$NAMESPACE" "$POD_NAME" -- bash -c "tar xzf $TMP_PATH -C /"
+
+# Suppression du fichier temporaire
+echo "🧽 Suppression du fichier temporaire..."
+kubectl exec -n "$NAMESPACE" "$POD_NAME" -- rm "$TMP_PATH"
+
+# Redémarrage du pod
+echo "🔄 Redémarrage du pod Jenkins..."
+kubectl delete pod -n "$NAMESPACE" "$POD_NAME" --wait=true
+
+echo "✅ Restauration terminée et pod redémarré."
