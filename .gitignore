@@ -1,3 +1,4 @@
 .vagrant/
 shared/k3s.yaml
 shared/token
+shared/*.tar.gz
