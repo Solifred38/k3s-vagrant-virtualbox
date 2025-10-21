@@ -147,7 +147,7 @@ sleep 10
 echo "attente que les pods soient ready"
 kubectl wait --namespace metallb-system \
   --for=condition=Ready pod \
-  --all --timeout=300s
+  --all --timeout=200s
 kubectl get pods -n metallb-system -o wide
 # configuration 
 echo "configuration du loadBalancer"
@@ -278,7 +278,7 @@ spec:
 
 EOF
 echo "attente que le pod soit pret"
-kubectl wait --for=condition=ready pod/jenkins-0 -n jenkins --timeout=300s
+kubectl wait --for=condition=ready pod/jenkins-0 -n jenkins --timeout=200s
 echo "✅ Le pod est prêt, vérification de la disponibilité du mot de passe..."
 # Boucle d’attente pour que Jenkins ait eu le temps de générer le mot de passe
 for i in {1..30}; do
@@ -299,7 +299,7 @@ SHELL
 server.vm.provision "restore-jenkins", type: "shell", inline: <<-SHELL
 /vagrant_shared/restore-jenkins.sh
 echo "attente que le pod soit pret"
-kubectl wait --for=condition=ready pod/jenkins-0 -n jenkins --timeout=300s
+kubectl wait --for=condition=ready pod/jenkins-0 -n jenkins --timeout=200s
 echo "jenkins est pret"
 SHELL
 

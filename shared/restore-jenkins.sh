@@ -32,6 +32,9 @@ kubectl exec -n "$NAMESPACE" "$POD_NAME" -- bash -c \
 
 # Nettoyage
 kubectl exec -n "$NAMESPACE" "$POD_NAME" -- bash -c "rm -rf $TMP_PATH $EXTRACT_DIR"
-
+echo "fin de la mise à jour suppression du pod jenkins pour la relance"
 # Redémarrage du pod
 kubectl delete pod -n "$NAMESPACE" "$POD_NAME" --wait=true >/dev/null
+# attente 10s
+echo "attente de relance de jenkins"
+sleep 10
