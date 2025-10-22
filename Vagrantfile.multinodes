@@ -92,6 +92,8 @@ agent_script = <<-SHELL
     export K3S_URL=https://#{server_ip}:6443
     export INSTALL_K3S_EXEC="--flannel-iface=eth1"
     curl -sfL https://get.k3s.io | sh -
+    # récupération du token sur le serveur par scp
+
 SHELL
 
 Vagrant.configure("2") do |config|
@@ -470,6 +472,10 @@ kubectl patch svc dashboard-kong-proxy -n kubernetes-dashboard \
 echo "adresse du dashboard: "
 IPDASH=$(kubectl get svc dashboard-kong-proxy -n kubernetes-dashboard \
   -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+echo "attente que tous les pods soient prets"
+kubectl wait --namespace kubernetes-dashboard \
+  --for=condition=Ready pod \
+  --all --timeout=200s
 
 echo "https://${IPDASH}"
 
