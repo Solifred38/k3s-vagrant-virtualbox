@@ -396,13 +396,18 @@ spec:
                   }
                 }
               }'
-              curl -X POST http://192.168.1.151:9200/demo-products/_doc -H 'Content-Type: application/json' -d '{"name":"Widget A","price":19.99,"in_stock":true}'
-              curl -X POST http://192.168.1.151:9200/demo-products/_doc -H 'Content-Type: application/json' -d '{"name":"Widget B","price":29.99,"in_stock":false}'
-              curl -X POST http://192.168.1.151:9200/demo-products/_doc -H 'Content-Type: application/json' -d '{"name":"Widget C","price":9.99,"in_stock":true}'
+              curl -X POST http://#{network_prefix}.151:9200/demo-products/_doc -H 'Content-Type: application/json' -d '{"name":"Widget A","price":19.99,"in_stock":true}'
+              curl -X POST http://#{network_prefix}.151:9200/demo-products/_doc -H 'Content-Type: application/json' -d '{"name":"Widget B","price":29.99,"in_stock":false}'
+              curl -X POST http://#{network_prefix}.151:9200/demo-products/_doc -H 'Content-Type: application/json' -d '{"name":"Widget C","price":9.99,"in_stock":true}'
               echo "Done."
       restartPolicy: Never  # ✅ placé au bon niveau
   backoffLimit: 3
 EOF
+  echo "attente que les pods elasticsearch soient prets"
+kubectl wait  --namespace=elk\
+  --for=condition=Ready pod \
+  --all --timeout=300s
+
 # installation kibana
   kubectl apply -f - <<'EOF'
 apiVersion: v1
@@ -418,7 +423,7 @@ spec:
     - name: http
       port: 5601
       targetPort: 5601
-  loadBalancerIP: 192.168.1.152
+  loadBalancerIP: #{network_prefix}.152
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -443,7 +448,7 @@ spec:
               name: http
           env:
             - name: ELASTICSEARCH_HOSTS
-              value: "http://192.168.1.151:9200"
+              value: "http://#{network_prefix}.151:9200"
             - name: SERVER_HOST
               value: "0.0.0.0"
           resources:
@@ -453,11 +458,13 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "250m"
+
 EOF
   echo "attente que tous les pods soient prets"
 kubectl wait  --namespace=elk\
   --for=condition=Ready pod \
-  --all --timeout=200s
+  --all --timeout=300s
+
 SHELL
 
 
