@@ -97,8 +97,8 @@ agent_script = <<-SHELL
 SHELL
 
 Vagrant.configure("2") do |config|
-  config.vm.box = "generic/alpine319"
-
+  # config.vm.box = "generic/alpine319"
+  config.vm.box = "k3s-ready.box"
   config.vm.define "server", primary: true do |server|
     server.vm.network "public_network", ip: server_ip
     
@@ -476,17 +476,11 @@ if kubectl get namespace kubernetes-dashboard &> /dev/null; then
   fi
 echo "installation dashboard"
 
-helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/
-helm repo update
-
 echo "creation namespace"
 kubectl create namespace kubernetes-dashboard
 
-helm install dashboard kubernetes-dashboard/kubernetes-dashboard \
-  --namespace kubernetes-dashboard \
-  --set kubernetesDashboard.service.type=LoadBalancer
-echo "creation d'un compte admin"
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
+echo "creation d'un compte admin"
 
 kubectl apply -f - <<'EOF'
 apiVersion: v1
@@ -515,6 +509,9 @@ echo "\n"
 # des fois çà marche pas il faut patcher
 kubectl patch svc kubernetes-dashboard -n kubernetes-dashboard \
   -p '{"spec": {"type": "LoadBalancer"}}'
+
+kubectl patch svc kubernetes-dashboard -n kubernetes-dashboard \
+  -p '{"spec": {"loadBalancerIP": "#{network_prefix}.201"}}'
 
 echo "adresse du dashboard: "
 IPDASH=$(kubectl get svc kubernetes-dashboard -n kubernetes-dashboard \
