@@ -71,10 +71,10 @@ server_script = <<-SHELL
     sudo chown vagrant:vagrant /etc/rancher/k3s/k3s.yaml
     echo 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml' >> /etc/profile
     
-    sudo cp /var/lib/rancher/k3s/server/token /vagrant_shared
+    sudo cp /var/lib/rancher/k3s/server/token /vagrant
     sudo chmod +r /etc/rancher/k3s/k3s.yaml
 
-    sudo cp /etc/rancher/k3s/k3s.yaml /vagrant_shared
+    sudo cp /etc/rancher/k3s/k3s.yaml /vagrant
     # petit alias 
     echo "alias k=kubectl" >> /home/vagrant/.bashrc
     echo 'if [ -f ~/.bashrc ]; then source ~/.bashrc; fi' >> /home/vagrant/.profile
@@ -88,7 +88,7 @@ agent_script = <<-SHELL
     if [ -f /usr/local/bin/k3s-agent-uninstall.sh ]; then
       /usr/local/bin/k3s-agent-uninstall.sh
     fi
-    export K3S_TOKEN_FILE=/vagrant_shared/token
+    export K3S_TOKEN_FILE=/vagrant/token
     export K3S_URL=https://#{server_ip}:6443
     export INSTALL_K3S_EXEC="--flannel-iface=eth1"
     curl -sfL https://get.k3s.io | sh -
@@ -102,10 +102,9 @@ Vagrant.configure("2") do |config|
   config.vm.define "server", primary: true do |server|
     server.vm.network "public_network", ip: server_ip
     
-    server.vm.synced_folder "./shared", "/vagrant_shared"
     server.vm.hostname = "server"
     server.vm.provider "virtualbox" do |vb|
-      vb.memory = "12000"
+      vb.memory = "16000"
       vb.cpus = "2"
     end
     server.vm.provision "cluster-k3s", type: "shell", inline: server_script
@@ -296,10 +295,10 @@ done
   SHELL
 
 server.vm.provision "backup-jenkins", type: "shell", inline: <<-SHELL
-/vagrant_shared/backup-jenkins.sh
+/vagrant/shell/backup-jenkins.sh
 SHELL
 server.vm.provision "restore-jenkins", type: "shell", inline: <<-SHELL
-/vagrant_shared/restore-jenkins.sh
+/vagrant/shell/restore-jenkins.sh
 echo "attente que le pod soit pret"
 kubectl wait --for=condition=ready pod/jenkins-0 -n jenkins --timeout=200s
 echo "jenkins est pret"
@@ -403,11 +402,6 @@ spec:
       restartPolicy: Never  # ✅ placé au bon niveau
   backoffLimit: 3
 EOF
-  echo "attente que les pods elasticsearch soient prets"
-kubectl wait  --namespace=elk\
-  --for=condition=Ready pod \
-  --all --timeout=300s
-
 # installation kibana
   kubectl apply -f - <<'EOF'
 apiVersion: v1
@@ -465,6 +459,8 @@ kubectl wait  --namespace=elk\
   --for=condition=Ready pod \
   --all --timeout=300s
 
+echo "attente de kibana"
+/vagrant/shell/wait-for-elk.sh
 SHELL
 
 
@@ -529,7 +525,6 @@ SHELL
   agents.each do |agent_name, agent_ip|
     config.vm.define agent_name do |agent|
       agent.vm.network "public_network", ip: agent_ip
-      agent.vm.synced_folder "./shared", "/vagrant_shared"
       agent.vm.hostname = agent_name
       agent.vm.provider "virtualbox" do |vb|
         vb.memory = "8000"
