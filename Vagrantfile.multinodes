@@ -99,6 +99,7 @@ SHELL
 Vagrant.configure("2") do |config|
   config.vm.box = "generic/alpine319"
   # config.vm.box = "k3s-ready.box"
+  config.vm.synced_folder ".", "/vagrant"
   config.vm.define "server", primary: true do |server|
     server.vm.network "public_network", ip: server_ip
     

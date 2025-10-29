@@ -1,5 +1,5 @@
 .vagrant/
-shared/k3s.yaml
-shared/token
-shared/*.tar.gz
-shared/*.jar
+k3s.yaml
+token
+*.tar.gz
+*.jar
