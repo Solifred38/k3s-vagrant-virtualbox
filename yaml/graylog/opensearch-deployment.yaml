@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: opensearch
+  namespace: graylog
+spec:
+  serviceName: "opensearch"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opensearch
+  template:
+    metadata:
+      labels:
+        app: opensearch
+    spec:
+      containers:
+        - name: opensearch
+          image: opensearchproject/opensearch:2.11.0
+          env:
+            - name: discovery.type
+              value: single-node
+            - name: OPENSEARCH_JAVA_OPTS
+              value: "-Xms512m -Xmx512m"
+            - name: DISABLE_SECURITY_PLUGIN
+              value: "true"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              echo "🔓 Désactivation du plugin de sécurité"
+              /usr/share/opensearch/bin/opensearch -E plugins.security.disabled=true
+          ports:
+            - containerPort: 9200
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensearch
+  namespace: graylog
+spec:
+  ports:
+    - port: 9200
+  selector:
+    app: opensearch

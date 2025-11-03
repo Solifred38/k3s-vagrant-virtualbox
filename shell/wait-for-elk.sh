@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-KIBANA_URL="http://localhost:5601/app/home"
+KIBANA_URL="http://192.168.10.152:5601/app/home"
 MAX_RETRIES=60
 SLEEP_SECONDS=5
 

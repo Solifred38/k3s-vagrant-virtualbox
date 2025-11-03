@@ -298,6 +298,232 @@ done
 server.vm.provision "backup-jenkins", type: "shell", inline: <<-SHELL
 /vagrant/shell/backup-jenkins.sh
 SHELL
+server.vm.provision "graylog", type: "shell", inline: <<-SHELL
+  # kubectl delete namespace graylog
+  
+  echo "creation namespace"
+  kubectl apply -f - <<EOF
+  apiVersion: v1
+  kind: Namespace
+  metadata:
+    name: graylog
+EOF
+echo "creation mongodb"
+kubectl apply -f - <<EOF
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: graylog
+spec:
+  serviceName: "mongodb"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+      - name: mongo
+        image: mongo:6
+        ports:
+        - containerPort: 27017
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: graylog
+spec:
+  ports:
+  - port: 27017
+  selector:
+    app: mongodb
+EOF
+echo "opensearch bootstrap"
+kubectl apply -f - <<EOF
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: opensearch-bootstrap
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: opensearch-bootstrap
+  template:
+    metadata:
+      labels:
+        name: opensearch-bootstrap
+    spec:
+      hostPID: true
+      hostNetwork: true
+      containers:
+        - name: sysctl
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "🔧 Configuration système pour OpenSearch"
+              sysctl -w vm.max_map_count=262144
+              echo "vm.max_map_count=$(sysctl -n vm.max_map_count)"
+              if command -v prlimit >/dev/null 2>&1; then
+                echo "🔧 Tentative d'élévation de ulimit via prlimit"
+                prlimit --pid 1 --nofile=65535:65535 || echo "⚠️ Échec prlimit"
+              else
+                echo "⚠️ prlimit non disponible"
+              fi
+              sleep 3600
+          securityContext:
+            privileged: true
+      restartPolicy: Always
+EOF
+echo "opensearch config map"
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opensearch-config
+  namespace: graylog
+data:
+  opensearch.yml: |
+    cluster.name: graylog-cluster
+    node.name: opensearch-0
+    discovery.type: single-node
+    cluster.initial_cluster_manager_nodes: ["opensearch-0"]
+    plugins.security.disabled: true
+EOF
+echo "creation opensearch"
+kubectl apply -f - <<EOF
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: opensearch
+  namespace: graylog
+spec:
+  serviceName: "opensearch"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opensearch
+  template:
+    metadata:
+      labels:
+        app: opensearch
+    spec:
+      containers:
+        - name: opensearch
+          image: opensearchproject/opensearch:2.11.0
+          env:
+            - name: OPENSEARCH_JAVA_OPTS
+              value: "-Xms512m -Xmx512m"
+          ports:
+            - containerPort: 9200
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /usr/share/opensearch/config/opensearch.yml
+              subPath: opensearch.yml
+      volumes:
+        - name: config
+          configMap:
+            name: opensearch-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensearch
+  namespace: graylog
+spec:
+  selector:
+    app: opensearch
+  ports:
+    - name: http
+      port: 9200
+      targetPort: 9200
+EOF
+echo "creation Graylog"
+kubectl apply -f - <<EOF
+# 🖥️ Graylog
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: graylog
+  namespace: graylog
+spec:
+  serviceName: "graylog"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: graylog
+  template:
+    metadata:
+      labels:
+        app: graylog
+    spec:
+      initContainers:
+        - name: wait-for-deps
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "⏳ Waiting for MongoDB and OpenSearch..."
+              until nc -z mongodb 27017 && nc -z opensearch 9200; do
+                echo "Dependencies not ready"
+                sleep 5
+              done
+              echo "✅ Dependencies ready!"
+      containers:
+        - name: graylog
+          image: graylog/graylog:5.2
+          env:
+            - name: GRAYLOG_PASSWORD_SECRET
+              value: 89a3dde751e0faf68f4916f4a724eed8
+            - name: GRAYLOG_ROOT_PASSWORD_SHA2
+              value: 8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918
+            - name: GRAYLOG_HTTP_EXTERNAL_URI
+              value: http://#{network_prefix}.250:9000/
+            - name: GRAYLOG_MONGODB_URI
+              value: mongodb://mongodb:27017/graylog
+            - name: GRAYLOG_ELASTICSEARCH_HOSTS
+              value: http://opensearch:9200
+          ports:
+            - name: http
+              containerPort: 9000
+            - name: gelf
+              containerPort: 12201
+              protocol: UDP
+---
+# 🌐 Service LoadBalancer (MetalLB)
+apiVersion: v1
+kind: Service
+metadata:
+  name: graylog
+  namespace: graylog
+spec:
+  type: LoadBalancer
+  loadBalancerIP: #{network_prefix}.250
+  selector:
+    app: graylog
+  ports:
+  - name: web
+    port: 9000
+    targetPort: 9000
+  - name: gelf-udp
+    port: 12201
+    protocol: UDP
+    targetPort: 12201
+  # 👉 Optionnel : fixe l'IP MetalLB si tu veux la réserver
+
+EOF
+
+SHELL
+
 server.vm.provision "restore-jenkins", type: "shell", inline: <<-SHELL
 /vagrant/shell/restore-jenkins.sh
 echo "attente que le pod soit pret"
@@ -311,160 +537,10 @@ if kubectl get namespace elk &> /dev/null; then
     kubectl delete namespace elk
 fi
 kubectl create namespace elk
-# installation d'elasticsearch en mode loadbalancer
-  kubectl apply -f - <<'EOF'
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: elasticsearch
-  namespace: elk
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: elasticsearch
-  template:
-    metadata:
-      labels:
-        app: elasticsearch
-    spec:
-      containers:
-        - name: elasticsearch
-          image: docker.elastic.co/elasticsearch/elasticsearch:7.17.10
-          ports:
-            - containerPort: 9200
-          env:
-            - name: discovery.type
-              value: single-node
-            - name: ES_JAVA_OPTS
-              value: "-Xms512m -Xmx512m"
-            - name: xpack.security.enabled
-              value: "false"
-            - name: bootstrap.memory_lock
-              value: "false"
-            - name: network.host
-              value: "0.0.0.0"
-          readinessProbe:
-            httpGet:
-              path: /
-              port: 9200
-            initialDelaySeconds: 10
-            periodSeconds: 5
-            failureThreshold: 3
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: elasticsearch
-  namespace: elk
-spec:
-  type: LoadBalancer
-  selector:
-    app: elasticsearch
-  ports:
-    - port: 9200
-      targetPort: 9200
-  loadBalancerIP: #{network_prefix}.151           
-EOF
-# init job elasticsearch
-kubectl apply -f - <<EOF
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: elasticsearch-init
-  namespace: elk
-spec:
-  template:
-    spec:
-      containers:
-        - name: init
-          image: curlimages/curl:7.85.0
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for Elasticsearch..."
-              until curl -s #{network_prefix}.151:9200 >/dev/null; do sleep 2; done
-              echo "Creating index and injecting documents..."
-              curl -X PUT #{network_prefix}.151:9200/demo-products -H 'Content-Type: application/json' -d '{
-                "settings": { "number_of_shards": 1 },
-                "mappings": {
-                  "properties": {
-                    "name": { "type": "text" },
-                    "price": { "type": "float" },
-                    "in_stock": { "type": "boolean" }
-                  }
-                }
-              }'
-              curl -X POST http://#{network_prefix}.151:9200/demo-products/_doc -H 'Content-Type: application/json' -d '{"name":"Widget A","price":19.99,"in_stock":true}'
-              curl -X POST http://#{network_prefix}.151:9200/demo-products/_doc -H 'Content-Type: application/json' -d '{"name":"Widget B","price":29.99,"in_stock":false}'
-              curl -X POST http://#{network_prefix}.151:9200/demo-products/_doc -H 'Content-Type: application/json' -d '{"name":"Widget C","price":9.99,"in_stock":true}'
-              echo "Done."
-      restartPolicy: Never  # ✅ placé au bon niveau
-  backoffLimit: 3
-EOF
-# installation kibana
-  kubectl apply -f - <<'EOF'
-apiVersion: v1
-kind: Service
-metadata:
-  name: kibana
-  namespace: elk
-spec:
-  type: LoadBalancer
-  selector:
-    app: kibana
-  ports:
-    - name: http
-      port: 5601
-      targetPort: 5601
-  loadBalancerIP: #{network_prefix}.152
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: kibana
-  namespace: elk
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: kibana
-  template:
-    metadata:
-      labels:
-        app: kibana
-    spec:
-      containers:
-        - name: kibana
-          image: docker.elastic.co/kibana/kibana:7.17.10
-          ports:
-            - containerPort: 5601
-              name: http
-          env:
-            - name: ELASTICSEARCH_HOSTS
-              value: "http://#{network_prefix}.151:9200"
-            - name: SERVER_HOST
-              value: "0.0.0.0"
-          resources:
-            requests:
-              memory: "256Mi"
-              cpu: "100m"
-            limits:
-              memory: "512Mi"
-              cpu: "250m"
+sudo chmod +x /vagrant/yaml/elk/deploy.sh
+/vagrant/yaml/elk/deploy.sh
 
-EOF
-  echo "attente que tous les pods soient prets"
-kubectl wait  --namespace=elk\
-  --for=condition=Ready pod \
-  --all --timeout=300s
-
-echo "attente de kibana"
-/vagrant/shell/wait-for-elk.sh
 SHELL
-
-
 server.vm.provision "dashboard", type: "shell", inline: <<-SHELL
 
 # initialisation si nécessaire
