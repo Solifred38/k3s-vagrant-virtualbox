@@ -48,8 +48,8 @@ load_balancer_range = "#{network_prefix}.150-#{network_prefix}.250"
 
 # agents = { "agent1" => "#{network_prefix}.101",
 #            "agent2" => "#{network_prefix}.102" }
-# agents = { "agent1" => "#{network_prefix}.101"}
-agents = {}
+agents = { "agent1" => "#{network_prefix}.101"}
+# agents = {}
 # Extra parameters in INSTALL_K3S_EXEC variable because of
 # K3s picking up the wrong interface when starting server and agent
 # https://github.com/alexellis/k3sup/issues/306
@@ -532,13 +532,10 @@ echo "jenkins est pret"
 SHELL
 
 server.vm.provision "elk", type: "shell", inline: <<-SHELL
-echo "suppression de l'ancienne installation"
-if kubectl get namespace elk &> /dev/null; then
-    kubectl delete namespace elk
-fi
-kubectl create namespace elk
 sudo chmod +x /vagrant/yaml/elk/deploy.sh
-/vagrant/yaml/elk/deploy.sh
+export NETWORK_PREFIX=#{network_prefix}
+echo "prefix network dans vagrantfile : $NETWORK_PREFIX"
+/vagrant/shell/deploy-elk.sh
 
 SHELL
 server.vm.provision "dashboard", type: "shell", inline: <<-SHELL

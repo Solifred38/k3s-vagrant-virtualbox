@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: kibana-config
-  namespace: elk
-data:
-  KIBANA_URL: "${KIBANA_URL}"

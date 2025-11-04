@@ -1,10 +1,40 @@
-apiVersion: kibana.k8s.elastic.co/v1
-kind: Kibana
+# kibana.yaml
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: quickstart
+  name: kibana
   namespace: elk
 spec:
-  version: 8.12.0
-  count: 1
-  elasticsearchRef:
-    name: quickstart
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kibana
+  template:
+    metadata:
+      labels:
+        app: kibana
+    spec:
+      containers:
+      - name: kibana
+        image: docker.elastic.co/kibana/kibana:8.10.2
+        ports:
+          - containerPort: 5601
+        env:
+          - name: ELASTICSEARCH_HOSTS
+            value: "http://elasticsearch:9200"
+          - name: XPACK_SECURITY_ENABLED
+            value: "false"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana
+  namespace: elk
+spec:
+  selector:
+    app: kibana
+  ports:
+    - port: 5601
+      targetPort: 5601
+  type: LoadBalancer
+  loadBalancerIP: 192.168.10.210

@@ -1,3 +1,4 @@
+# logstash.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,13 +16,25 @@ spec:
     spec:
       containers:
       - name: logstash
-        image: docker.elastic.co/logstash/logstash:8.12.0
+        image: docker.elastic.co/logstash/logstash:8.10.2
         ports:
-        - containerPort: 5044
+          - containerPort: 5044
         volumeMounts:
-        - name: config-volume
-          mountPath: /usr/share/logstash/pipeline
+          - name: logstash-pipeline
+            mountPath: /usr/share/logstash/pipeline
       volumes:
-      - name: config-volume
-        configMap:
-          name: logstash-pipeline
+        - name: logstash-pipeline
+          configMap:
+            name: logstash-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logstash
+  namespace: elk
+spec:
+  selector:
+    app: logstash
+  ports:
+    - port: 5044
+      targetPort: 5044
