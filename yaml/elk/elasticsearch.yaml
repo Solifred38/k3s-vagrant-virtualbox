@@ -44,3 +44,5 @@ spec:
   ports:
     - port: 9200
       targetPort: 9200
+  type: LoadBalancer
+  loadBalancerIP: ${ES_IP}

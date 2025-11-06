@@ -46,9 +46,9 @@ server_ip = "#{network_prefix}.100"
 load_balancer_range = "#{network_prefix}.150-#{network_prefix}.250"
 
 
-# agents = { "agent1" => "#{network_prefix}.101",
-#            "agent2" => "#{network_prefix}.102" }
-agents = { "agent1" => "#{network_prefix}.101"}
+agents = { "agent1" => "#{network_prefix}.101",
+           "agent2" => "#{network_prefix}.102" }
+# agents = { "agent1" => "#{network_prefix}.101"}
 # agents = {}
 # Extra parameters in INSTALL_K3S_EXEC variable because of
 # K3s picking up the wrong interface when starting server and agent
@@ -137,48 +137,10 @@ Vagrant.configure("2") do |config|
     SHELL
 
     server.vm.provision "metallb-install", type: "shell", inline: <<-SHELL
-    # re creation du namespace vierge après suppression de son contenu
-  echo "suppression de l'ancien package metallb-system"
-	if kubectl get namespace metallb-system &> /dev/null; then
-  		kubectl delete namespace metallb-system
-	fi
-kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.8/config/manifests/metallb-native.yaml
-# attente de création des ressources dans metallb-system
-echo "attente de création des ressources dans metallb-system"
-sleep 10
-echo "attente que les pods soient ready"
-kubectl wait --namespace metallb-system \
-  --for=condition=Ready pod \
-  --all --timeout=200s
-kubectl get pods -n metallb-system -o wide
-# configuration 
-echo "configuration du loadBalancer"
-kubectl -n metallb-system patch daemonset speaker \
-  --type='json' \
-  -p='[{"op": "remove", "path": "/spec/template/spec/nodeSelector/speaker"}]'|| true
-echo "echelle des adresses : #{load_balancer_range}"
-
-
-  kubectl apply -f - <<'EOF'
-apiVersion: metallb.io/v1beta1
-kind: IPAddressPool
-metadata:
-  name: my-ip-pool
-  namespace: metallb-system
-spec:
-  addresses:
-  - #{load_balancer_range}
-
----
-apiVersion: metallb.io/v1beta1
-kind: L2Advertisement
-metadata:
-  name: l2-advertisement
-  namespace: metallb-system
-spec:
-  ipAddressPools:
-  - my-ip-pool
-EOF
+    export LOADBALANCER_RANGE=#{load_balancer_range}
+    echo "RANGE metallb : $LOADBALANCER_RANGE"
+    sudo chmod +x /vagrant/shell/deploy-metallb.sh
+    /vagrant/shell/deploy-metallb.sh
 SHELL
 
 server.vm.provision "jenkins", type: "shell", inline: <<-SHELL
@@ -532,7 +494,7 @@ echo "jenkins est pret"
 SHELL
 
 server.vm.provision "elk", type: "shell", inline: <<-SHELL
-sudo chmod +x /vagrant/yaml/elk/deploy.sh
+sudo chmod +x /vagrant/shell/deploy-elk.sh
 export NETWORK_PREFIX=#{network_prefix}
 echo "prefix network dans vagrantfile : $NETWORK_PREFIX"
 /vagrant/shell/deploy-elk.sh
