@@ -18,4 +18,5 @@ envsubst < $KIBANA_PATH/elasticsearch.yaml | kubectl apply -f -
 kubectl apply -f $KIBANA_PATH/logstash-config.yaml
 kubectl apply -f $KIBANA_PATH/logstash.yaml
 envsubst < $KIBANA_PATH/kibana.yaml | kubectl apply -f -
+kubectl apply -f $KIBANA_PATH/metricbeat-kubernetes.yaml
 echo "✅ Déploiement terminé. Accès Kibana : http://${KIBANA_IP}:5601"

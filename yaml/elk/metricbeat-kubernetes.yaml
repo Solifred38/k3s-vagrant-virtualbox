@@ -1,0 +1,151 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kube-system
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: metricbeat
+  namespace: kube-system
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: metricbeat
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: metricbeat
+  namespace: kube-system
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metricbeat-config
+  namespace: kube-system
+data:
+  metricbeat.yml: |-
+    metricbeat.config.modules:
+      path: ${path.config}/modules.d/*.yml
+      reload.enabled: false
+
+    setup.template.settings:
+      index.number_of_shards: 1
+
+    output.elasticsearch:
+      hosts: ["http://elasticsearch.elk.svc.cluster.local:9200"]
+      username: "elastic"
+      password: ""
+
+    processors:
+      - add_host_metadata: ~
+      - add_cloud_metadata: ~
+      - add_kubernetes_metadata: ~
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metricbeat-modules
+  namespace: kube-system
+data:
+  docker.yml: |-
+    - module: docker
+      metricsets:
+        - container
+        - cpu
+        - diskio
+        - healthcheck
+        - info
+        - memory
+        - network
+      hosts: ["unix:///var/run/docker.sock"]
+      period: 10s
+      enabled: true
+
+---
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: metricbeat
+  namespace: kube-system
+  labels:
+    k8s-app: metricbeat
+spec:
+  selector:
+    matchLabels:
+      k8s-app: metricbeat
+  template:
+    metadata:
+      labels:
+        k8s-app: metricbeat
+    spec:
+      serviceAccountName: metricbeat
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0
+      containers:
+      - name: metricbeat
+        image: docker.elastic.co/beats/metricbeat:8.10.2
+        securityContext:
+          privileged: true       # <-- ajouté
+          runAsUser: 0
+          runAsGroup: 0
+          allowPrivilegeEscalation: true
+        args:
+          - "-e"
+          - "-system.hostfs=/hostfs"
+        env:
+          - name: ELASTICSEARCH_HOST
+            value: "http://elasticsearch.elk.svc.cluster.local:9200"
+          - name: ELASTICSEARCH_USERNAME
+            value: "elastic"
+          - name: ELASTICSEARCH_PASSWORD
+            value: ""
+        volumeMounts:
+          - name: proc
+            mountPath: /hostfs/proc
+            readOnly: true
+          - name: cgroup
+            mountPath: /hostfs/sys/fs/cgroup
+            readOnly: true
+          - name: dockersock
+            mountPath: /var/run/docker.sock
+            readOnly: true
+          - name: config
+            mountPath: /usr/share/metricbeat/metricbeat.yml
+            subPath: metricbeat.yml
+          - name: modules
+            mountPath: /usr/share/metricbeat/modules.d
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+        - name: dockersock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
+        - name: config
+          configMap:
+            name: metricbeat-config
+        - name: modules
+          configMap:
+            name: metricbeat-modules
+
