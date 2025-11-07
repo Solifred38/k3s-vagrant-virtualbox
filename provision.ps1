@@ -1,6 +1,5 @@
 # Chemin vers ton Vagrantfile
-$VagrantfilePath = ".\Vagrantfile.multinodes"
-$env:VAGRANT_VAGRANTFILE=$VagrantfilePath
+$VagrantfilePath = ".\Vagrantfile"
 # Lire le contenu
 $content = Get-Content $VagrantfilePath -Raw
 

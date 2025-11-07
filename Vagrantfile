@@ -1,0 +1,530 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+require 'rbconfig'
+
+# 🔍 Détection IP réelle sur Windows
+def detect_real_ip_windows
+  output = `ipconfig`.force_encoding("IBM437").encode("UTF-8", invalid: :replace, undef: :replace, replace: '')
+  lines = output.lines.map(&:strip)
+
+  lines.each do |line|
+    clean = line.encode('ASCII', invalid: :replace, undef: :replace, replace: '').gsub(/\s+/, ' ')
+    if clean =~ /Adresse IPv4.*?: (\d+\.\d+\.\d+\.\d+)/
+      ip = $1
+      return ip if ip.start_with?('192.168.10.') || ip.start_with?('192.168.1.')
+    end
+  end
+
+  nil
+end
+
+# 🔍 Détection IP sur Linux/macOS
+def detect_real_ip_unix
+  `ip route get 1.1.1.1`.match(/src (\d+\.\d+\.\d+\.\d+)/)&.captures&.first
+end
+
+# 🔍 Détection universelle
+def detect_real_ip
+  if RbConfig::CONFIG['host_os'] =~ /mswin|mingw|cygwin/
+    detect_real_ip_windows
+  else
+    detect_real_ip_unix
+  end
+end
+
+# 🧠 Déduction du préfixe réseau
+def network_prefix
+  ip = detect_real_ip
+  return '192.168.10' if ip&.start_with?('192.168.10.')
+  return '192.168.1'  if ip&.start_with?('192.168.1.')
+  '192.168.10' # fallback
+end
+
+# quelques variables d'environnement
+apps_path="/vagrant/apps"
+# 📦 IPs dynamiques
+server_ip = "#{network_prefix}.100"
+load_balancer_range = "#{network_prefix}.150-#{network_prefix}.250"
+
+
+agents = { "agent1" => "#{network_prefix}.101",
+           "agent2" => "#{network_prefix}.102" }
+# agents = { "agent1" => "#{network_prefix}.101"}
+# agents = {}
+# Extra parameters in INSTALL_K3S_EXEC variable because of
+# K3s picking up the wrong interface when starting server and agent
+# https://github.com/alexellis/k3sup/issues/306
+
+server_script = <<-SHELL
+  export SERVER_IP=#{server_ip}
+  sudo chmod +x #{apps_path}/k3s/shell/server-script.sh
+  #{apps_path}/k3s/shell/server-script.sh
+   
+SHELL
+
+agent_script = <<-SHELL
+  export SERVER_IP=#{server_ip}
+  sudo chmod +x #{apps_path}/k3s/shell/agent-script.sh
+  #{apps_path}/k3s/shell/agent-script.sh
+SHELL
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "generic/alpine319"
+  # config.vm.box = "k3s-ready.box"
+  config.vm.synced_folder ".", "/vagrant", type: "virtualbox"
+  config.vm.define "server", primary: true do |server|
+    server.vm.network "public_network", ip: server_ip
+    
+    server.vm.hostname = "server"
+    server.vm.provider "virtualbox" do |vb|
+      vb.memory = "16000"
+      vb.cpus = "2"
+    end
+    server.vm.provision "cluster-k3s", type: "shell", inline: server_script
+  
+    server.vm.provision "helm", type: "shell", inline: <<-SHELL
+    #!/bin/bash
+     # installation helm
+    echo "installation helm"
+    apk add git
+    sudo curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    chmod 700 get_helm.sh
+    ./get_helm.sh
+    SHELL
+
+    server.vm.provision "metallb-install", type: "shell", inline: <<-SHELL
+    export APP_PATH=#{apps_path}
+    export LOADBALANCER_RANGE=#{load_balancer_range}
+    echo "RANGE metallb : $LOADBALANCER_RANGE"
+    sudo chmod +x #{apps_path}/metallb/shell/deploy-metallb.sh
+    #{apps_path}/metallb/shell/deploy-metallb.sh
+SHELL
+
+server.vm.provision "jenkins", type: "shell", inline: <<-SHELL
+echo "entree dans installation de jenkins"
+if kubectl get namespace jenkins &> /dev/null; then
+    kubectl delete namespace jenkins
+fi
+
+echo "=== Installation de Jenkins ==="
+kubectl create namespace jenkins || true
+
+# Volume persistant
+mkdir -p /data/jenkins
+echo "creation des volumes"
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: jenkins-pv
+  namespace: jenkins
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: /data/jenkins
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jenkins-pvc
+  namespace: jenkins
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+EOF
+
+echo " Pods + Service"
+kubectl apply -f - <<EOF
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: jenkins
+  namespace: jenkins
+spec:
+  serviceName: "jenkins"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jenkins
+  template:
+    metadata:
+      labels:
+        app: jenkins
+    spec:
+      containers:
+        - name: jenkins
+          image: jenkins/jenkins:lts-jdk17
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: agent
+              containerPort: 50000
+          volumeMounts:
+            - name: jenkins-data
+              mountPath: /var/jenkins_home
+  volumeClaimTemplates:
+    - metadata:
+        name: jenkins-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jenkins
+  namespace: jenkins
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+    - port: 50000
+      targetPort: 50000
+      protocol: TCP
+      name: agent
+  loadBalancerIP: #{network_prefix}.200
+  selector:
+    app: jenkins
+
+EOF
+echo "attente que le pod soit pret"
+kubectl wait --for=condition=ready pod/jenkins-0 -n jenkins --timeout=200s
+echo "✅ Le pod est prêt, vérification de la disponibilité du mot de passe..."
+# Boucle d’attente pour que Jenkins ait eu le temps de générer le mot de passe
+for i in {1..30}; do
+  if kubectl -n jenkins exec jenkins-0 -- test -f /var/jenkins_home/secrets/initialAdminPassword 2>/dev/null; then
+    echo "🔑 Fichier trouvé ! Récupération du mot de passe :"
+    kubectl -n jenkins exec jenkins-0 -- cat /var/jenkins_home/secrets/initialAdminPassword
+    break
+  else
+    echo "⏳ Fichier pas encore créé... tentative $i/30"
+    sleep 10
+  fi
+done
+  SHELL
+
+server.vm.provision "backup-jenkins", type: "shell", inline: <<-SHELL
+/vagrant/shell/backup-jenkins.sh
+SHELL
+server.vm.provision "graylog", type: "shell", inline: <<-SHELL
+  # kubectl delete namespace graylog
+  
+  echo "creation namespace"
+  kubectl apply -f - <<EOF
+  apiVersion: v1
+  kind: Namespace
+  metadata:
+    name: graylog
+EOF
+echo "creation mongodb"
+kubectl apply -f - <<EOF
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: graylog
+spec:
+  serviceName: "mongodb"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+      - name: mongo
+        image: mongo:6
+        ports:
+        - containerPort: 27017
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: graylog
+spec:
+  ports:
+  - port: 27017
+  selector:
+    app: mongodb
+EOF
+echo "opensearch bootstrap"
+kubectl apply -f - <<EOF
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: opensearch-bootstrap
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: opensearch-bootstrap
+  template:
+    metadata:
+      labels:
+        name: opensearch-bootstrap
+    spec:
+      hostPID: true
+      hostNetwork: true
+      containers:
+        - name: sysctl
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "🔧 Configuration système pour OpenSearch"
+              sysctl -w vm.max_map_count=262144
+              echo "vm.max_map_count=$(sysctl -n vm.max_map_count)"
+              if command -v prlimit >/dev/null 2>&1; then
+                echo "🔧 Tentative d'élévation de ulimit via prlimit"
+                prlimit --pid 1 --nofile=65535:65535 || echo "⚠️ Échec prlimit"
+              else
+                echo "⚠️ prlimit non disponible"
+              fi
+              sleep 3600
+          securityContext:
+            privileged: true
+      restartPolicy: Always
+EOF
+echo "opensearch config map"
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opensearch-config
+  namespace: graylog
+data:
+  opensearch.yml: |
+    cluster.name: graylog-cluster
+    node.name: opensearch-0
+    discovery.type: single-node
+    cluster.initial_cluster_manager_nodes: ["opensearch-0"]
+    plugins.security.disabled: true
+EOF
+echo "creation opensearch"
+kubectl apply -f - <<EOF
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: opensearch
+  namespace: graylog
+spec:
+  serviceName: "opensearch"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opensearch
+  template:
+    metadata:
+      labels:
+        app: opensearch
+    spec:
+      containers:
+        - name: opensearch
+          image: opensearchproject/opensearch:2.11.0
+          env:
+            - name: OPENSEARCH_JAVA_OPTS
+              value: "-Xms512m -Xmx512m"
+          ports:
+            - containerPort: 9200
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /usr/share/opensearch/config/opensearch.yml
+              subPath: opensearch.yml
+      volumes:
+        - name: config
+          configMap:
+            name: opensearch-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensearch
+  namespace: graylog
+spec:
+  selector:
+    app: opensearch
+  ports:
+    - name: http
+      port: 9200
+      targetPort: 9200
+EOF
+echo "creation Graylog"
+kubectl apply -f - <<EOF
+# 🖥️ Graylog
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: graylog
+  namespace: graylog
+spec:
+  serviceName: "graylog"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: graylog
+  template:
+    metadata:
+      labels:
+        app: graylog
+    spec:
+      initContainers:
+        - name: wait-for-deps
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "⏳ Waiting for MongoDB and OpenSearch..."
+              until nc -z mongodb 27017 && nc -z opensearch 9200; do
+                echo "Dependencies not ready"
+                sleep 5
+              done
+              echo "✅ Dependencies ready!"
+      containers:
+        - name: graylog
+          image: graylog/graylog:5.2
+          env:
+            - name: GRAYLOG_PASSWORD_SECRET
+              value: 89a3dde751e0faf68f4916f4a724eed8
+            - name: GRAYLOG_ROOT_PASSWORD_SHA2
+              value: 8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918
+            - name: GRAYLOG_HTTP_EXTERNAL_URI
+              value: http://#{network_prefix}.250:9000/
+            - name: GRAYLOG_MONGODB_URI
+              value: mongodb://mongodb:27017/graylog
+            - name: GRAYLOG_ELASTICSEARCH_HOSTS
+              value: http://opensearch:9200
+          ports:
+            - name: http
+              containerPort: 9000
+            - name: gelf
+              containerPort: 12201
+              protocol: UDP
+---
+# 🌐 Service LoadBalancer (MetalLB)
+apiVersion: v1
+kind: Service
+metadata:
+  name: graylog
+  namespace: graylog
+spec:
+  type: LoadBalancer
+  loadBalancerIP: #{network_prefix}.250
+  selector:
+    app: graylog
+  ports:
+  - name: web
+    port: 9000
+    targetPort: 9000
+  - name: gelf-udp
+    port: 12201
+    protocol: UDP
+    targetPort: 12201
+  # 👉 Optionnel : fixe l'IP MetalLB si tu veux la réserver
+
+EOF
+
+SHELL
+
+server.vm.provision "restore-jenkins", type: "shell", inline: <<-SHELL
+/vagrant/shell/restore-jenkins.sh
+echo "attente que le pod soit pret"
+kubectl wait --for=condition=ready pod/jenkins-0 -n jenkins --timeout=200s
+echo "jenkins est pret"
+SHELL
+
+server.vm.provision "elk", type: "shell", inline: <<-SHELL
+sudo chmod +x #{apps_path}/elk/shell/deploy-elk.sh
+export NETWORK_PREFIX=#{network_prefix}
+echo "prefix network dans vagrantfile : $NETWORK_PREFIX"
+#{apps_path}/elk/shell/deploy-elk.sh
+
+SHELL
+server.vm.provision "dashboard", type: "shell", inline: <<-SHELL
+
+# initialisation si nécessaire
+if kubectl get namespace kubernetes-dashboard &> /dev/null; then
+        kubectl delete namespace kubernetes-dashboard
+  fi
+echo "installation dashboard"
+
+echo "creation namespace"
+kubectl create namespace kubernetes-dashboard
+
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
+echo "creation d'un compte admin"
+
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: admin-user
+  namespace: kubernetes-dashboard
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: admin-user
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: admin-user
+  namespace: kubernetes-dashboard
+EOF
+
+kubectl -n kubernetes-dashboard create token admin-user
+
+echo "\n"
+# des fois çà marche pas il faut patcher
+kubectl patch svc kubernetes-dashboard -n kubernetes-dashboard \
+  -p '{"spec": {"type": "LoadBalancer"}}'
+
+kubectl patch svc kubernetes-dashboard -n kubernetes-dashboard \
+  -p '{"spec": {"loadBalancerIP": "#{network_prefix}.201"}}'
+
+echo "adresse du dashboard: "
+IPDASH=$(kubectl get svc kubernetes-dashboard -n kubernetes-dashboard \
+  -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+echo "attente que tous les pods soient prets"
+kubectl wait --namespace kubernetes-dashboard \
+  --for=condition=Ready pod \
+  --all --timeout=200s
+
+echo "https://${IPDASH}"
+
+SHELL
+
+  end
+  agents.each do |agent_name, agent_ip|
+    config.vm.define agent_name do |agent|
+      agent.vm.network "public_network", ip: agent_ip
+      agent.vm.hostname = agent_name
+      agent.vm.provider "virtualbox" do |vb|
+        vb.memory = "8000"
+        vb.cpus = "2"
+      end
+      agent.vm.provision "cluster-k3s", type: "shell", inline: agent_script
+    end
+  end
+end
