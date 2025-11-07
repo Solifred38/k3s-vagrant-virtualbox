@@ -1,0 +1,37 @@
+#opensearch-daemonset.yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: opensearch-bootstrap
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: opensearch-bootstrap
+  template:
+    metadata:
+      labels:
+        name: opensearch-bootstrap
+    spec:
+      hostPID: true
+      hostNetwork: true
+      containers:
+        - name: sysctl
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "🔧 Configuration système pour OpenSearch"
+              sysctl -w vm.max_map_count=262144
+              echo "vm.max_map_count=$(sysctl -n vm.max_map_count)"
+              if command -v prlimit >/dev/null 2>&1; then
+                echo "🔧 Tentative d'élévation de ulimit via prlimit"
+                prlimit --pid 1 --nofile=65535:65535 || echo "⚠️ Échec prlimit"
+              else
+                echo "⚠️ prlimit non disponible"
+              fi
+              sleep 3600
+          securityContext:
+            privileged: true
+      restartPolicy: Always

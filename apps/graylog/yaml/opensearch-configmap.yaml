@@ -1,0 +1,13 @@
+#opensearch-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opensearch-config
+  namespace: graylog
+data:
+  opensearch.yml: |
+    cluster.name: graylog-cluster
+    node.name: opensearch-0
+    discovery.type: single-node
+    cluster.initial_cluster_manager_nodes: ["opensearch-0"]
+    plugins.security.disabled: true
