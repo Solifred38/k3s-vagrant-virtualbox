@@ -115,12 +115,12 @@ SHELL
 server.vm.provision "graylog", type: "shell", inline: <<-SHELL
     export GRAYLOG_IP=#{network_prefix}.250
     export APP_PATH=#{apps_path}
-    sudo chmod +x #{apps_path}/graylog/shell/deploy-graylog.sh
-    #{apps_path}/graylog/shell/deploy-graylog.sh
+    sudo chmod +x $APP_PATH/graylog/shell/deploy-graylog.sh
+    $APP_PATH/graylog/shell/deploy-graylog.sh
   
 SHELL
 
-server.vm.provision "restore-jenkins", type: "shell", inline: <<-SHELL
+  server.vm.provision "restore-jenkins", type: "shell", inline: <<-SHELL
 /vagrant/shell/restore-jenkins.sh
 echo "attente que le pod soit pret"
 kubectl wait --for=condition=ready pod/jenkins-0 -n jenkins --timeout=200s
@@ -128,67 +128,21 @@ echo "jenkins est pret"
 SHELL
 
 server.vm.provision "elk", type: "shell", inline: <<-SHELL
-sudo chmod +x #{apps_path}/elk/shell/deploy-elk.sh
-export NETWORK_PREFIX=#{network_prefix}
-echo "prefix network dans vagrantfile : $NETWORK_PREFIX"
-#{apps_path}/elk/shell/deploy-elk.sh
+  export APP_PATH=#{apps_path}
+  sudo chmod +x $APP_PATH/elk/shell/deploy-elk.sh
+  export NETWORK_PREFIX=#{network_prefix}
+  echo "prefix network dans vagrantfile : $NETWORK_PREFIX"
+  $APP_PATH/elk/shell/deploy-elk.sh
 
 SHELL
 server.vm.provision "dashboard", type: "shell", inline: <<-SHELL
-
-# initialisation si nécessaire
-if kubectl get namespace kubernetes-dashboard &> /dev/null; then
-        kubectl delete namespace kubernetes-dashboard
-  fi
-echo "installation dashboard"
-
-echo "creation namespace"
-kubectl create namespace kubernetes-dashboard
-
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
-echo "creation d'un compte admin"
-
-kubectl apply -f - <<'EOF'
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: admin-user
-  namespace: kubernetes-dashboard
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: admin-user
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: cluster-admin
-subjects:
-- kind: ServiceAccount
-  name: admin-user
-  namespace: kubernetes-dashboard
-EOF
-
-kubectl -n kubernetes-dashboard create token admin-user
-
-echo "\n"
-# des fois çà marche pas il faut patcher
-kubectl patch svc kubernetes-dashboard -n kubernetes-dashboard \
-  -p '{"spec": {"type": "LoadBalancer"}}'
-
-kubectl patch svc kubernetes-dashboard -n kubernetes-dashboard \
-  -p '{"spec": {"loadBalancerIP": "#{network_prefix}.201"}}'
-
-echo "adresse du dashboard: "
-IPDASH=$(kubectl get svc kubernetes-dashboard -n kubernetes-dashboard \
-  -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-echo "attente que tous les pods soient prets"
-kubectl wait --namespace kubernetes-dashboard \
-  --for=condition=Ready pod \
-  --all --timeout=200s
-
-echo "https://${IPDASH}"
-
+  export APP_PATH=#{apps_path}
+  sudo chmod +x $APP_PATH/dashboard/shell/deploy-dashboard.sh
+  export NETWORK_PREFIX=#{network_prefix}
+  export IPDASH=#{network_prefix}.201
+  echo "IPDASH : $IPDASH"
+  # echo "prefix network dans vagrantfile : $NETWORK_PREFIX"
+  $APP_PATH/dashboard/shell/deploy-dashboard.sh
 SHELL
 
   end
