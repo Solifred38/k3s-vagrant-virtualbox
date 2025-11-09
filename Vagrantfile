@@ -97,15 +97,15 @@ Vagrant.configure("2") do |config|
     export APP_PATH=#{apps_path}
     export LOADBALANCER_RANGE=#{load_balancer_range}
     echo "RANGE metallb : $LOADBALANCER_RANGE"
-    sudo chmod +x #{apps_path}/metallb/shell/deploy-metallb.sh
-    #{apps_path}/metallb/shell/deploy-metallb.sh
+    sudo chmod +x $APP_PATH/metallb/shell/deploy-metallb.sh
+    $APP_PATH/metallb/shell/deploy-metallb.sh
 SHELL
 
 server.vm.provision "jenkins", type: "shell", inline: <<-SHELL
     export JENKINS_IP=#{network_prefix}.200
     export APP_PATH=#{apps_path}
-    sudo chmod +x #{apps_path}/jenkins/shell/deploy-jenkins.sh
-    #{apps_path}/jenkins/shell/deploy-jenkins.sh
+    sudo chmod +x $APP_PATH/jenkins/shell/deploy-jenkins.sh
+    $APP_PATH/jenkins/shell/deploy-jenkins.sh
 
   SHELL
 

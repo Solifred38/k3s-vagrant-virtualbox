@@ -19,4 +19,9 @@ kubectl apply -f $KIBANA_PATH/logstash-config.yaml
 kubectl apply -f $KIBANA_PATH/logstash.yaml
 envsubst < $KIBANA_PATH/kibana.yaml | kubectl apply -f -
 kubectl apply -f $KIBANA_PATH/metricbeat-kubernetes.yaml
+echo "attente que tous les pods soient prets"
+echo "attente que les pods soient ready"
+kubectl wait --namespace elk \
+  --for=condition=Ready pod \
+  --all
 echo "✅ Déploiement terminé. Accès Kibana : http://${KIBANA_IP}:5601"
