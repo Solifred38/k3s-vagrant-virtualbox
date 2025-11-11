@@ -19,3 +19,8 @@ kubectl apply -f $APP_PATH/graylog/yaml/opensearch-deployment.yaml
 
 echo "creation Graylog"
 envsubst < $APP_PATH/graylog/yaml/graylog-deployment.yaml | kubectl apply -f -
+echo "attente des pods"
+kubectl wait --namespace graylog \
+  --for=condition=Ready pod \
+  --all \
+  --timeout=600s

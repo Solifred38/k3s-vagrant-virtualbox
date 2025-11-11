@@ -48,9 +48,9 @@ server_ip = "#{network_prefix}.100"
 load_balancer_range = "#{network_prefix}.150-#{network_prefix}.250"
 
 
-agents = { "agent1" => "#{network_prefix}.101",
-           "agent2" => "#{network_prefix}.102" }
-# agents = { "agent1" => "#{network_prefix}.101"}
+# agents = { "agent1" => "#{network_prefix}.101",
+#            "agent2" => "#{network_prefix}.102" }
+agents = { "agent1" => "#{network_prefix}.101"}
 # agents = {}
 # Extra parameters in INSTALL_K3S_EXEC variable because of
 # K3s picking up the wrong interface when starting server and agent
@@ -84,13 +84,8 @@ Vagrant.configure("2") do |config|
     server.vm.provision "cluster-k3s", type: "shell", inline: server_script
   
     server.vm.provision "helm", type: "shell", inline: <<-SHELL
-    #!/bin/bash
-     # installation helm
-    echo "installation helm"
-    apk add git
-    sudo curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
-    chmod 700 get_helm.sh
-    ./get_helm.sh
+    sudo chmod +x #{apps_path}/helm/shell/deploy-helm.sh
+    #{apps_path}/helm/shell/deploy-helm.sh
     SHELL
 
     server.vm.provision "metallb-install", type: "shell", inline: <<-SHELL
@@ -151,7 +146,7 @@ SHELL
       agent.vm.network "public_network", ip: agent_ip
       agent.vm.hostname = agent_name
       agent.vm.provider "virtualbox" do |vb|
-        vb.memory = "8000"
+        vb.memory = "16000"
         vb.cpus = "2"
       end
       agent.vm.provision "cluster-k3s", type: "shell", inline: agent_script
