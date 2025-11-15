@@ -13,15 +13,17 @@ kubectl apply -f https://download.elastic.co/downloads/eck/2.10.0/operator.yaml
 echo "📦 Déploiement de la stack Kibana avec IP $KIBANA_IP"
 
 export KIBANA_PATH=/vagrant/apps/elk/yaml
-kubectl apply -f $KIBANA_PATH/elk-namespace.yaml
-envsubst < $KIBANA_PATH/elasticsearch.yaml | kubectl apply -f -
-kubectl apply -f $KIBANA_PATH/logstash-config.yaml
-kubectl apply -f $KIBANA_PATH/logstash.yaml
-envsubst < $KIBANA_PATH/kibana.yaml | kubectl apply -f -
-kubectl apply -f $KIBANA_PATH/metricbeat-kubernetes.yaml
+# kubectl apply -f $KIBANA_PATH/elk-namespace.yaml
+# envsubst < $KIBANA_PATH/elasticsearch.yaml | kubectl apply -f -
+# kubectl apply -f $KIBANA_PATH/logstash-config.yaml
+# kubectl apply -f $KIBANA_PATH/logstash.yaml
+# envsubst < $KIBANA_PATH/kibana.yaml | kubectl apply -f -
+# envsubst < $KIBANA_PATH/metricbeat-kubernetes.yaml | kubectl apply -f -
+envsubst < $KIBANA_PATH/elastic-all-in-one.yaml | kubectl apply -f -
 echo "attente que tous les pods soient prets"
 echo "attente que les pods soient ready"
-kubectl wait --namespace elk \
+kubectl wait --namespace elastic-system \
   --for=condition=Ready pod \
   --all
 echo "✅ Déploiement terminé. Accès Kibana : http://${KIBANA_IP}:5601"
+sudo kubectl config set-context --current --namespace elastic-system
