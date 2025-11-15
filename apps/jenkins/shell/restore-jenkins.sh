@@ -5,7 +5,7 @@ set -euo pipefail
 # Variables
 POD_NAME="jenkins-0"
 NAMESPACE="jenkins"
-BACKUP_FILE="/vagrant_shared/backup-jenkins.tar.gz"
+BACKUP_FILE="/vagrant/backup-jenkins.tar.gz"
 TMP_PATH="/tmp/backup-jenkins.tar.gz"
 EXTRACT_DIR="/tmp/restore"
 TARGET_DIR="/var/jenkins_home"

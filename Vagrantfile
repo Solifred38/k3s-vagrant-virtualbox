@@ -105,7 +105,8 @@ server.vm.provision "jenkins", type: "shell", inline: <<-SHELL
   SHELL
 
 server.vm.provision "backup-jenkins", type: "shell", inline: <<-SHELL
-/vagrant/shell/backup-jenkins.sh
+    export APP_PATH=#{apps_path}
+    $APP_PATH/jenkins/shell/backup-jenkins.sh
 SHELL
 server.vm.provision "graylog", type: "shell", inline: <<-SHELL
     export GRAYLOG_IP=#{network_prefix}.250
@@ -116,10 +117,11 @@ server.vm.provision "graylog", type: "shell", inline: <<-SHELL
 SHELL
 
   server.vm.provision "restore-jenkins", type: "shell", inline: <<-SHELL
-/vagrant/shell/restore-jenkins.sh
-echo "attente que le pod soit pret"
-kubectl wait --for=condition=ready pod/jenkins-0 -n jenkins --timeout=200s
-echo "jenkins est pret"
+    export APP_PATH=#{apps_path}
+    $APP_PATH/jenkins/shell/restore-jenkins.sh
+    echo "attente que le pod soit pret"
+    kubectl wait --for=condition=ready pod/jenkins-0 -n jenkins --timeout=200s
+    echo "jenkins est pret"
 SHELL
 
 server.vm.provision "elk", type: "shell", inline: <<-SHELL
