@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metricbeat
+  namespace: elastic-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: metricbeat
+  template:
+    metadata:
+      labels:
+        app: metricbeat
+    spec:
+      containers:
+        - name: metricbeat
+          image: docker.elastic.co/beats/metricbeat:8.15.3
+          env:
+            - name: ELASTICSEARCH_HOSTS
+              value: "http://elasticsearch.elastic-system.svc.cluster.local:9200"
+            - name: ELASTICSEARCH_USERNAME
+              value: "beats_system"
+            - name: ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: elastic-credentials
+                  key: BEATS_SYSTEM_PASSWORD
