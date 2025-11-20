@@ -50,8 +50,8 @@ load_balancer_range = "#{network_prefix}.150-#{network_prefix}.250"
 
 # agents = { "agent1" => "#{network_prefix}.101",
 #            "agent2" => "#{network_prefix}.102" }
-# agents = { "agent1" => "#{network_prefix}.101"}
-agents = {}
+agents = { "agent1" => "#{network_prefix}.101"}
+# agents = {}
 # Extra parameters in INSTALL_K3S_EXEC variable because of
 # K3s picking up the wrong interface when starting server and agent
 # https://github.com/alexellis/k3sup/issues/306

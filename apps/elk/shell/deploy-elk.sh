@@ -66,6 +66,12 @@ curl -u elastic:$ELASTIC_PASS -X POST \
 
 # 7. Nettoyer le port-forward
 kill $PF_PID
+# Appliquer le Job d'initialisation des comptes système
+echo "job d'initialisation des users"
+kubectl apply -f $KIBANA_PATH/elastic_init_users_job.yaml
+echo "attente que le job se termine"
+# Attendre que le Job se termine
+kubectl wait --for=condition=complete job/elastic-init-users -n elastic-system --timeout=120s
 
 echo "🎉 Stack ELK déployé automatiquement avec Kibana, Beats et Logstash configurés"
 sudo kubectl config set-context --current --namespace elastic-system

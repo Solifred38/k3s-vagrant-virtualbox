@@ -1,0 +1,26 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: elastic-init-users
+  namespace: elastic-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: init-users
+          image: curlimages/curl:8.5.0
+          command: ["sh", "-c"]
+          args:
+            - |
+              ELASTIC_PASS=$(kubectl get secret elastic-credentials -n elastic-system -o jsonpath='{.data.ELASTIC_PASSWORD}' | base64 -d);
+              KIBANA_PASS=$(kubectl get secret elastic-credentials -n elastic-system -o jsonpath='{.data.KIBANA_SYSTEM_PASSWORD}' | base64 -d);
+              BEATS_PASS=$(kubectl get secret elastic-credentials -n elastic-system -o jsonpath='{.data.BEATS_SYSTEM_PASSWORD}' | base64 -d);
+              LOGSTASH_PASS=$(kubectl get secret elastic-credentials -n elastic-system -o jsonpath='{.data.LOGSTASH_SYSTEM_PASSWORD}' | base64 -d);
+
+              curl -u elastic:$ELASTIC_PASS -X POST http://elasticsearch:9200/_security/user/kibana_system/_password -H 'Content-Type: application/json' -d "{\"password\":\"$KIBANA_PASS\"}";
+              curl -u elastic:$ELASTIC_PASS -X POST http://elasticsearch:9200/_security/user/beats_system/_password -H 'Content-Type: application/json' -d "{\"password\":\"$BEATS_PASS\"}";
+              curl -u elastic:$ELASTIC_PASS -X POST http://elasticsearch:9200/_security/user/logstash_system/_password -H 'Content-Type: application/json' -d "{\"password\":\"$LOGSTASH_PASS\"}";
+          env:
+            - name: ELASTICSEARCH_HOST
+              value: "http://elasticsearch.elastic-system.svc.cluster.local:9200"
+      restartPolicy: OnFailure
