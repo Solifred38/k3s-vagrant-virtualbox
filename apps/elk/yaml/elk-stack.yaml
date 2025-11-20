@@ -50,6 +50,8 @@ metadata:
   name: elasticsearch
   namespace: elastic-system
 spec:
+  type: LoadBalancer
+  loadBalancerIP: ${ES_IP}   # IP fournie par ta variable d'environnement
   selector:
     app: elasticsearch
   ports:
@@ -101,7 +103,7 @@ metadata:
   namespace: elastic-system
 spec:
   type: LoadBalancer
-  loadBalancerIP: ${KIBANA_IP}   # IP réservée par MetalLB
+  loadBalancerIP: ${KIBANA_IP}   # IP fournie par ta variable d'environnement
   selector:
     app: kibana
   ports:
@@ -253,7 +255,7 @@ data:
     }
     output {
       elasticsearch {
-        hosts => ["http://elasticsearch.elastic-system.svc.cluster.local:9200"]
+        hosts => ["http://${ES_IP}:9200"]
         user => "logstash_system"
         password => "${LOGSTASH_SYSTEM_PASSWORD}"
         index => "logs-%{+YYYY.MM.dd}"
@@ -279,7 +281,7 @@ spec:
               BEATS_PASS=$(kubectl get secret elastic-credentials -n elastic-system -o jsonpath='{.data.BEATS_SYSTEM_PASSWORD}' | base64 -d);
               LOGSTASH_PASS=$(kubectl get secret elastic-credentials -n elastic-system -o jsonpath='{.data.LOGSTASH_SYSTEM_PASSWORD}' | base64 -d);
 
-              curl -u elastic:$ELASTIC_PASS -X POST http://elasticsearch:9200/_security/user/kibana_system/_password -H 'Content-Type: application/json' -d "{\"password\":\"$KIBANA_PASS\"}";
-              curl -u elastic:$ELASTIC_PASS -X POST http://elasticsearch:9200/_security/user/beats_system/_password -H 'Content-Type: application/json' -d "{\"password\":\"$BEATS_PASS\"}";
-              curl -u elastic:$ELASTIC_PASS -X POST http://elasticsearch:9200/_security/user/logstash_system/_password -H 'Content-Type: application/json' -d "{\"password\":\"$LOGSTASH_PASS\"}";
+              curl -u elastic:$ELASTIC_PASS -X POST http://${ES_IP}:9200/_security/user/kibana_system/_password -H 'Content-Type: application/json' -d "{\"password\":\"$KIBANA_PASS\"}";
+              curl -u elastic:$ELASTIC_PASS -X POST http://${ES_IP}:9200/_security/user/beats_system/_password -H 'Content-Type: application/json' -d "{\"password\":\"$BEATS_PASS\"}";
+              curl -u elastic:$ELASTIC_PASS -X POST http://${ES_IP}:9200/_security/user/logstash_system/_password -H 'Content-Type: application/json' -d "{\"password\":\"$LOGSTASH_PASS\"}";
       restartPolicy: OnFailure
