@@ -43,6 +43,10 @@ spec:
                   key: ELASTIC_PASSWORD
             - name: discovery.type
               value: "single-node"
+            - name: xpack.security.enabled
+              value: "true"
+            - name: xpack.security.http.ssl.enabled
+              value: "false"   # 🔑 TLS désactivé pour HTTP clair
 ---
 apiVersion: v1
 kind: Service
@@ -281,7 +285,17 @@ spec:
               BEATS_PASS=$(kubectl get secret elastic-credentials -n elastic-system -o jsonpath='{.data.BEATS_SYSTEM_PASSWORD}' | base64 -d);
               LOGSTASH_PASS=$(kubectl get secret elastic-credentials -n elastic-system -o jsonpath='{.data.LOGSTASH_SYSTEM_PASSWORD}' | base64 -d);
 
-              curl -u elastic:$ELASTIC_PASS -X POST http://${ES_IP}:9200/_security/user/kibana_system/_password -H 'Content-Type: application/json' -d "{\"password\":\"$KIBANA_PASS\"}";
-              curl -u elastic:$ELASTIC_PASS -X POST http://${ES_IP}:9200/_security/user/beats_system/_password -H 'Content-Type: application/json' -d "{\"password\":\"$BEATS_PASS\"}";
-              curl -u elastic:$ELASTIC_PASS -X POST http://${ES_IP}:9200/_security/user/logstash_system/_password -H 'Content-Type: application/json' -d "{\"password\":\"$LOGSTASH_PASS\"}";
+              echo "⏳ Attente qu'Elasticsearch soit prêt..."
+              until curl -s -u elastic:$ELASTIC_PASS http://elasticsearch:9200/_cluster/health | grep -q '"status"'; do
+                echo "Elasticsearch pas encore prêt, retry dans 5s..."
+                sleep 5
+              done
+
+              echo "✅ Elasticsearch prêt, configuration des comptes système..."
+              curl -u elastic:$ELASTIC_PASS -X POST http://elasticsearch:9200/_security/user/kibana_system/_password \
+                -H 'Content-Type: application/json' -d "{\"password\":\"$KIBANA_PASS\"}"
+              curl -u elastic:$ELASTIC_PASS -X POST http://elasticsearch:9200/_security/user/beats_system/_password \
+                -H 'Content-Type: application/json' -d "{\"password\":\"$BEATS_PASS\"}"
+              curl -u elastic:$ELASTIC_PASS -X POST http://elasticsearch:9200/_security/user/logstash_system/_password \
+                -H 'Content-Type: application/json' -d "{\"password\":\"$LOGSTASH_PASS\"}"
       restartPolicy: OnFailure
