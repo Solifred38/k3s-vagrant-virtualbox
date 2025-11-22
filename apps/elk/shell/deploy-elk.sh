@@ -1,14 +1,20 @@
 #!/bin/bash
 
 sudo apk add envsubst -f
-
-if [ -z "$NETWORK_PREFIX" ]; then
-    echo 'NETWORK_PREFIX est non initialisé'
-    export NETWORK_PREFIX=192.168.10
-fi
+get_net_prefix() {
+  ip addr show | awk '/inet 192/ {
+    split($2, a, "/");
+    split(a[1], b, ".");
+    print b[1]"."b[2]"."b[3];
+    exit
+  }'
+}
+NETWORK_PREFIX=$(get_net_prefix)
+echo $NETWORK_PREFIX
 # # IP MetalLB fixe pour Kibana
  export KIBANA_IP=$NETWORK_PREFIX.210
  export ES_IP=$NETWORK_PREFIX.211
+ 
 #  export KIBANA_SERVICE_TOKEN="AAEAAWVsYXN0aWMva2liYW5hL2tpYmFuYS10b2tlbjoxejFzZ25DM1NONm9ldGJVZlVENy1n"
 #  echo "IP de KIBANA : $KIBANA_IP"
 
