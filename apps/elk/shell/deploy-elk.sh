@@ -14,6 +14,8 @@ echo $NETWORK_PREFIX
 # # IP MetalLB fixe pour Kibana
  export KIBANA_IP=$NETWORK_PREFIX.210
  export ES_IP=$NETWORK_PREFIX.211
+ echo "suppression de l'ancienne stack"
+ kubectl delete namespace elastic-system
  
 #  export KIBANA_SERVICE_TOKEN="AAEAAWVsYXN0aWMva2liYW5hL2tpYmFuYS10b2tlbjoxejFzZ25DM1NONm9ldGJVZlVENy1n"
 #  echo "IP de KIBANA : $KIBANA_IP"
@@ -33,7 +35,6 @@ echo "attente que les pods soient ready"
 kubectl wait --for=condition=ready pod -l app=elasticsearch -n elastic-system --timeout=600s
 kubectl wait --for=condition=ready pod -l app=kibana -n elastic-system --timeout=600s
 kubectl wait --for=condition=ready pod -l app=logstash -n elastic-system --timeout=300s
-kubectl wait --for=condition=complete job/elastic-init-users -n elastic-system --timeout=120s
 
 echo "🎉 Stack ELK déployé automatiquement avec Kibana, Beats et Logstash configurés"
 sudo kubectl config set-context --current --namespace elastic-system
