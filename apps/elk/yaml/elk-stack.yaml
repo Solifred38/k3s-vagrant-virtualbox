@@ -27,12 +27,12 @@ spec:
             - name: discovery.type
               value: "single-node"
             - name: xpack.security.enabled
-              value: "false"   # 🔧 sécurité désactivée
+              value: "false"
           readinessProbe:
             httpGet:
               path: /
               port: 9200
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
             periodSeconds: 5
 ---
 apiVersion: v1
@@ -42,7 +42,7 @@ metadata:
   namespace: elastic-system
 spec:
   type: LoadBalancer
-  loadBalancerIP: ${ES_IP}   # 🔧 IP fixe pour Elasticsearch
+  loadBalancerIP: ${ELASTIC_IP}
   selector:
     app: elasticsearch
   ports:
@@ -84,7 +84,7 @@ spec:
             httpGet:
               path: /api/status
               port: 5601
-            initialDelaySeconds: 20
+            initialDelaySeconds: 25
             periodSeconds: 5
 ---
 apiVersion: v1
@@ -94,7 +94,7 @@ metadata:
   namespace: elastic-system
 spec:
   type: LoadBalancer
-  loadBalancerIP: ${KIBANA_IP}   # 🔧 IP fixe pour Kibana
+  loadBalancerIP: ${KIBANA_IP}
   selector:
     app: kibana
   ports:
@@ -108,11 +108,28 @@ metadata:
   namespace: elastic-system
 data:
   logstash.conf: |
-    input { beats { port => 5044 } }
+    input {
+      beats {
+        port => 5044
+      }
+    }
+
     output {
-      elasticsearch {
-        hosts => ["http://elasticsearch:9200"]
-        index => "logstash-%{+YYYY.MM.dd}"
+      if [@metadata][beat] == "filebeat" {
+        elasticsearch {
+          hosts => ["http://elasticsearch:9200"]
+          index => "filebeat-%{+YYYY.MM.dd}"
+        }
+      } else if [@metadata][beat] == "metricbeat" {
+        elasticsearch {
+          hosts => ["http://elasticsearch:9200"]
+          index => "metricbeat-%{+YYYY.MM.dd}"
+        }
+      } else {
+        elasticsearch {
+          hosts => ["http://elasticsearch:9200"]
+          index => "logstash-%{+YYYY.MM.dd}"
+        }
       }
     }
 ---
@@ -144,6 +161,40 @@ spec:
           configMap:
             name: logstash-pipeline
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logstash
+  namespace: elastic-system
+spec:
+  selector:
+    app: logstash
+  ports:
+    - name: beats
+      port: 5044
+      targetPort: 5044
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: filebeat-config
+  namespace: elastic-system
+data:
+  filebeat.yml: |
+    filebeat.inputs:
+      - type: log
+        enabled: true
+        paths:
+          - /var/log/*.log
+          - /var/log/syslog
+          - /var/log/messages
+
+    output.logstash:
+      hosts: ["logstash.elastic-system.svc.cluster.local:5044"]
+
+    setup.ilm.enabled: false
+---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -162,16 +213,50 @@ spec:
         - name: filebeat
           image: docker.elastic.co/beats/filebeat:8.15.3
           args: ["-e"]
-          env:
-            - name: ELASTICSEARCH_HOSTS
-              value: "http://elasticsearch:9200"
+          securityContext:
+            runAsUser: 0
           volumeMounts:
             - name: varlog
               mountPath: /var/log
+            - name: filebeat-config
+              mountPath: /usr/share/filebeat/filebeat.yml
+              subPath: filebeat.yml
       volumes:
         - name: varlog
           hostPath:
             path: /var/log
+        - name: filebeat-config
+          configMap:
+            name: filebeat-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metricbeat-config
+  namespace: elastic-system
+data:
+  metricbeat.yml: |
+    metricbeat.modules:
+      - module: system
+        period: 10s
+        metricsets:
+          - cpu
+          - memory
+          - network
+          - diskio
+          - filesystem
+          - process
+        process.include_top_n:
+          by_cpu: 5
+          by_memory: 5
+        processors:
+          - add_host_metadata: ~
+          - add_cloud_metadata: ~
+
+    output.elasticsearch:
+      hosts: ["http://elasticsearch:9200"]
+
+    setup.ilm.enabled: false
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -191,7 +276,115 @@ spec:
       containers:
         - name: metricbeat
           image: docker.elastic.co/beats/metricbeat:8.15.3
-          args: ["-e"]
-          env:
-            - name: ELASTICSEARCH_HOSTS
-              value: "http://elasticsearch:9200"
+          args: ["-e", "-c", "/usr/share/metricbeat/metricbeat.yml"]
+          volumeMounts:
+            - name: metricbeat-config
+              mountPath: /usr/share/metricbeat/metricbeat.yml
+              subPath: metricbeat.yml
+      volumes:
+        - name: metricbeat-config
+          configMap:
+            name: metricbeat-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kibana-dashboard
+  namespace: elastic-system
+data:
+  dashboard.json: |
+    {
+      "version": "8.15.3",
+      "objects": [
+        {
+          "type": "dashboard",
+          "id": "system-logs-overview",
+          "attributes": {
+            "title": "System & Logs Overview",
+            "panelsJSON": "[{\"panelIndex\":\"1\",\"type\":\"visualization\",\"id\":\"cpu-usage\"},{\"panelIndex\":\"2\",\"type\":\"visualization\",\"id\":\"memory-usage\"},{\"panelIndex\":\"3\",\"type\":\"visualization\",\"id\":\"disk-io\"},{\"panelIndex\":\"4\",\"type\":\"visualization\",\"id\":\"network-traffic\"},{\"panelIndex\":\"5\",\"type\":\"visualization\",\"id\":\"logs-by-level\"}]",
+            "optionsJSON": "{\"hidePanelTitles\":false}"
+          }
+        },
+        {
+          "type": "visualization",
+          "id": "cpu-usage",
+          "attributes": {
+            "title": "CPU Usage",
+            "visState": "{\"title\":\"CPU Usage\",\"type\":\"line\",\"params\":{},\"aggs\":[{\"id\":\"1\",\"type\":\"avg\",\"schema\":\"metric\",\"params\":{\"field\":\"system.cpu.total.pct\"}},{\"id\":\"2\",\"type\":\"date_histogram\",\"schema\":\"segment\",\"params\":{\"field\":\"@timestamp\",\"interval\":\"auto\"}}]}",
+            "uiStateJSON": "{}",
+            "savedSearchId": "metricbeat-*"
+          }
+        },
+        {
+          "type": "visualization",
+          "id": "memory-usage",
+          "attributes": {
+            "title": "Memory Usage",
+            "visState": "{\"title\":\"Memory Usage\",\"type\":\"line\",\"params\":{},\"aggs\":[{\"id\":\"1\",\"type\":\"avg\",\"schema\":\"metric\",\"params\":{\"field\":\"system.memory.actual.used.pct\"}},{\"id\":\"2\",\"type\":\"date_histogram\",\"schema\":\"segment\",\"params\":{\"field\":\"@timestamp\",\"interval\":\"auto\"}}]}",
+            "uiStateJSON": "{}",
+            "savedSearchId": "metricbeat-*"
+          }
+        },
+        {
+          "type": "visualization",
+          "id": "disk-io",
+          "attributes": {
+            "title": "Disk I/O",
+            "visState": "{\"title\":\"Disk I/O\",\"type\":\"line\",\"params\":{},\"aggs\":[{\"id\":\"1\",\"type\":\"avg\",\"schema\":\"metric\",\"params\":{\"field\":\"system.diskio.io_time\"}},{\"id\":\"2\",\"type\":\"date_histogram\",\"schema\":\"segment\",\"params\":{\"field\":\"@timestamp\",\"interval\":\"auto\"}}]}",
+            "uiStateJSON": "{}",
+            "savedSearchId": "metricbeat-*"
+          }
+        },
+        {
+          "type": "visualization",
+          "id": "network-traffic",
+          "attributes": {
+            "title": "Network Traffic",
+            "visState": "{\"title\":\"Network Traffic\",\"type\":\"line\",\"params\":{},\"aggs\":[{\"id\":\"1\",\"type\":\"avg\",\"schema\":\"metric\",\"params\":{\"field\":\"system.network.in.bytes\"}},{\"id\":\"2\",\"type\":\"avg\",\"schema\":\"metric\",\"params\":{\"field\":\"system.network.out.bytes\"}},{\"id\":\"3\",\"type\":\"date_histogram\",\"schema\":\"segment\",\"params\":{\"field\":\"@timestamp\",\"interval\":\"auto\"}}]}",
+            "uiStateJSON": "{}",
+            "savedSearchId": "metricbeat-*"
+          }
+        },
+        {
+          "type": "visualization",
+          "id": "logs-by-level",
+          "attributes": {
+            "title": "Logs by Level",
+            "visState": "{\"title\":\"Logs by Level\",\"type\":\"pie\",\"params\":{},\"aggs\":[{\"id\":\"1\",\"type\":\"count\",\"schema\":\"metric\",\"params\":{}},{\"id\":\"2\",\"type\":\"terms\",\"schema\":\"segment\",\"params\":{\"field\":\"log.level\",\"size\":5}}]}",
+            "uiStateJSON": "{}",
+            "savedSearchId": "filebeat-*"
+          }
+        }
+      ]
+    }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kibana-import-dashboard
+  namespace: elastic-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: import-dashboard
+          image: curlimages/curl:8.5.0
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "⏳ Attente que Kibana soit prêt..."
+              until curl -s http://kibana:5601/api/status | grep -q '"overall":{"state":"green"'; do
+                sleep 5
+              done
+              echo "✅ Import du dashboard..."
+              curl -X POST http://kibana:5601/api/saved_objects/_import \
+                -H "kbn-xsrf: true" \
+                --form file=@/dashboard/dashboard.json
+          volumeMounts:
+            - name: dashboard
+              mountPath: /dashboard
+      volumes:
+        - name: dashboard
+          configMap:
+            name: kibana-dashboard
+      restartPolicy: OnFailure

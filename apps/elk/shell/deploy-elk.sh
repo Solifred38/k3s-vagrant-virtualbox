@@ -13,7 +13,7 @@ NETWORK_PREFIX=$(get_net_prefix)
 echo $NETWORK_PREFIX
 # # IP MetalLB fixe pour Kibana
  export KIBANA_IP=$NETWORK_PREFIX.210
- export ES_IP=$NETWORK_PREFIX.211
+ export ELASTIC_IP=$NETWORK_PREFIX.211
  echo "suppression de l'ancienne stack"
  kubectl delete namespace elastic-system
  
