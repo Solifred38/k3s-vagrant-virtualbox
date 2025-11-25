@@ -1,5 +1,5 @@
 #server-script.sh
-sudo -i
+# sudo -i
     apk update
     apk add bash curl coreutils sudo openrc iproute2 e2fsprogs tcpdump wget tar
  

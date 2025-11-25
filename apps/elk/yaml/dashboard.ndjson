@@ -1,0 +1,16 @@
+{
+  "attributes": {
+    "title": "Cluster Monitoring Dashboard",
+    "panelsJSON": "[{\"type\":\"visualization\",\"id\":\"cpu-usage\"},{\"type\":\"visualization\",\"id\":\"memory-usage\"},{\"type\":\"visualization\",\"id\":\"filesystem-usage\"},{\"type\":\"visualization\",\"id\":\"network-traffic\"},{\"type\":\"visualization\",\"id\":\"top-processes\"},{\"type\":\"visualization\",\"id\":\"filebeat-logs\"}]",
+    "optionsJSON": "{\"hidePanelTitles\":false}"
+  },
+  "references": [
+    {"id":"cpu-usage","name":"panel_0","type":"visualization"},
+    {"id":"memory-usage","name":"panel_1","type":"visualization"},
+    {"id":"filesystem-usage","name":"panel_2","type":"visualization"},
+    {"id":"network-traffic","name":"panel_3","type":"visualization"},
+    {"id":"top-processes","name":"panel_4","type":"visualization"},
+    {"id":"filebeat-logs","name":"panel_5","type":"visualization"}
+  ],
+  "type": "dashboard"
+}

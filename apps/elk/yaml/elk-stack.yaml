@@ -41,8 +41,7 @@ metadata:
   name: elasticsearch
   namespace: elastic-system
 spec:
-  type: LoadBalancer
-  loadBalancerIP: ${ELASTIC_IP}
+  type: ClusterIP
   selector:
     app: elasticsearch
   ports:
@@ -254,7 +253,7 @@ data:
           - add_cloud_metadata: ~
 
     output.elasticsearch:
-      hosts: ["http://elasticsearch:9200"]
+      hosts: ["http://elasticsearch.elastic-system.svc.cluster.local:9200"]
 
     setup.ilm.enabled: false
 ---
