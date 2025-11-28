@@ -1,0 +1,37 @@
+# filebeat-import-dashboards-final.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: filebeat-import-dashboards-final
+  namespace: elastic-system # Le namespace où se trouve Kibana
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      # Nous utilisons le même ServiceAccount par défaut que pour Metricbeat
+      containers:
+      - name: filebeat-setup
+        image: docker.elastic.co/beats/filebeat:8.15.3 # Assurez-vous de la bonne version
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            KIBANA_SVC="http://kibana.elastic-system:5601"
+            
+            echo "1. Attente de la disponibilité de Kibana à $KIBANA_SVC..."
+            # Boucle d'attente : vérifie l'API de Kibana toutes les 5 secondes
+            until curl -s -f "$KIBANA_SVC/api/status"; do
+              echo "Kibana ($KIBANA_SVC) n'est pas prêt. Attente de 5s..."
+              sleep 5
+            done
+            
+            echo "2. Kibana est prêt. Lancement de l'importation vers $KIBANA_SVC..."
+            
+            # --- CORRECTION : Définition de l'hôte Kibana avec -E ---
+            filebeat setup --dashboards -E setup.kibana.host="$KIBANA_SVC"
+            
+        env:
+          # Configuration Elasticsearch (pour l'importation des Index Templates)
+        - name: ELASTICSEARCH_HOSTS
+          value: '["http://elasticsearch.elastic-system:9200"]' # Adaptez si le service ES est différent
+          
+      restartPolicy: OnFailure

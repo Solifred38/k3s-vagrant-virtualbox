@@ -25,6 +25,10 @@ kubectl wait --for=condition=ready pod -l app=logstash -n elastic-system --timeo
 
 echo "🎉 Stack ELK déployé automatiquement avec Kibana, Beats et Logstash configurés"
 sudo kubectl config set-context --current --namespace elastic-system
+# import des dashboard
+kubectl apply -f $KIBANA_PATH/filebeat-import-dashboard-job.yaml
+kubectl apply -f $KIBANA_PATH/metricbeat-import-dashboard-job.yaml
+
 # import des objets dans kibana
 #curl -X POST "http://$KIBANA_IP:5601/api/saved_objects/_import?overwrite=true" \
 #  -H "kbn-xsrf: true" \

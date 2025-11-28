@@ -1,0 +1,36 @@
+# metricbeat-import-dashboards-final.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: metricbeat-import-dashboards-final
+  namespace: elastic-system
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      containers:
+      - name: metricbeat-setup
+        image: docker.elastic.co/beats/metricbeat:8.15.3
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            KIBANA_SVC="http://kibana.elastic-system:5601"
+            
+            echo "1. Attente de la disponibilité de Kibana à $KIBANA_SVC..."
+            # Boucle d'attente (avec l'adresse correcte)
+            until curl -s -f "$KIBANA_SVC/api/status"; do
+              echo "Kibana ($KIBANA_SVC) n'est pas prêt. Attente de 5s..."
+              sleep 5
+            done
+            
+            echo "2. Kibana est prêt. Lancement de l'importation vers $KIBANA_SVC..."
+            
+            # --- CORRECTION ICI : On passe l'hôte directement à la commande setup ---
+            metricbeat setup --dashboards -E setup.kibana.host="$KIBANA_SVC"
+            
+        env:
+          # Nous gardons la variable ELASTICSEARCH_HOSTS si elle est nécessaire pour les templates
+        - name: ELASTICSEARCH_HOSTS
+          value: '["http://elasticsearch.elastic-system:9200"]' 
+          
+      restartPolicy: OnFailure
