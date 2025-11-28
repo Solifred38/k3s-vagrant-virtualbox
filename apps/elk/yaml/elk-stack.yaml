@@ -229,61 +229,108 @@ spec:
             name: filebeat-config
 ---
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: metricbeat
+  namespace: elastic-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: metricbeat
+rules:
+- apiGroups: [""]
+  resources:
+  - nodes
+  - pods
+  - namespaces
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources:
+  - deployments
+  - daemonsets
+  - replicasets
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: metricbeat
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: metricbeat
+subjects:
+- kind: ServiceAccount
+  name: metricbeat
+  namespace: elastic-system
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: metricbeat-config
   namespace: elastic-system
 data:
-  metricbeat.yml: |
+  metricbeat.yml: |-
     metricbeat.modules:
       - module: system
         period: 10s
         metricsets:
-          - cpu
-          - memory
-          - network
-          - diskio
-          - filesystem
           - process
-        process.include_top_n:
-          by_cpu: 5
-          by_memory: 5
-        processors:
-          - add_host_metadata: ~
-          - add_cloud_metadata: ~
+          - process_summary
+        processes: ['.*']
+        process.include_fields: ["name", "pid"]
+        hostfs: /hostfs
 
     output.elasticsearch:
-      hosts: ["http://elasticsearch.elastic-system.svc.cluster.local:9200"]
-
-    setup.ilm.enabled: false
+      hosts: ["http://elasticsearch:9200"]
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: DaemonSet
 metadata:
   name: metricbeat
   namespace: elastic-system
+  labels:
+    k8s-app: metricbeat
 spec:
-  replicas: 1
   selector:
     matchLabels:
-      app: metricbeat
+      k8s-app: metricbeat
   template:
     metadata:
       labels:
-        app: metricbeat
+        k8s-app: metricbeat
     spec:
+      serviceAccountName: metricbeat
+      hostNetwork: true
+      hostPID: true
+      dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: metricbeat
-          image: docker.elastic.co/beats/metricbeat:8.15.3
-          args: ["-e", "-c", "/usr/share/metricbeat/metricbeat.yml"]
+          image: docker.elastic.co/beats/metricbeat:8.18.0
+          args: ["-e"]
+          securityContext:
+            privileged: true
           volumeMounts:
-            - name: metricbeat-config
+            - name: config
               mountPath: /usr/share/metricbeat/metricbeat.yml
               subPath: metricbeat.yml
+              readOnly: true
+            - name: data
+              mountPath: /usr/share/metricbeat/data
+            - name: hostfs
+              mountPath: /hostfs
+              readOnly: true
       volumes:
-        - name: metricbeat-config
+        - name: config
           configMap:
+            defaultMode: 0640
             name: metricbeat-config
+        - name: data
+          emptyDir: {}
+        - name: hostfs
+          hostPath:
+            path: /
 ---
 apiVersion: v1
 kind: ConfigMap

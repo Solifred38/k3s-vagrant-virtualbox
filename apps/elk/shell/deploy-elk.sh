@@ -1,21 +1,8 @@
 #!/bin/bash
-
-sudo apk add envsubst -f
-get_net_prefix() {
-  ip addr show | awk '/inet 192/ {
-    split($2, a, "/");
-    split(a[1], b, ".");
-    print b[1]"."b[2]"."b[3];
-    exit
-  }'
-}
-NETWORK_PREFIX=$(get_net_prefix)
-echo $NETWORK_PREFIX
-# # IP MetalLB fixe pour Kibana
- export KIBANA_IP=$NETWORK_PREFIX.210
- export ELASTIC_IP=$NETWORK_PREFIX.211
- echo "suppression de l'ancienne stack"
- kubectl delete namespace elastic-system
+sudo chmod +x ./set-env-var.sh
+. ./set-env-var.sh
+# echo "suppression de l'ancienne stack"
+# kubectl delete namespace elastic-system
  
 #  export KIBANA_SERVICE_TOKEN="AAEAAWVsYXN0aWMva2liYW5hL2tpYmFuYS10b2tlbjoxejFzZ25DM1NONm9ldGJVZlVENy1n"
 #  echo "IP de KIBANA : $KIBANA_IP"
@@ -38,4 +25,9 @@ kubectl wait --for=condition=ready pod -l app=logstash -n elastic-system --timeo
 
 echo "🎉 Stack ELK déployé automatiquement avec Kibana, Beats et Logstash configurés"
 sudo kubectl config set-context --current --namespace elastic-system
+# import des objets dans kibana
+#curl -X POST "http://$KIBANA_IP:5601/api/saved_objects/_import?overwrite=true" \
+#  -H "kbn-xsrf: true" \
+#  -H "Content-Type: multipart/form-data" \
+#  -F "file=@../yaml/dashboard.ndjson"
 
