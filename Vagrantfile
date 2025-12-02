@@ -42,10 +42,10 @@ def network_prefix
 end
 
 # quelques variables d'environnement
+common_path="/vagrant/common"
 apps_path="/vagrant/apps"
 # 📦 IPs dynamiques
 server_ip = "#{network_prefix}.100"
-load_balancer_range = "#{network_prefix}.150-#{network_prefix}.250"
 
 
 # agents = { "agent1" => "#{network_prefix}.101",
@@ -57,16 +57,13 @@ agents = { "agent1" => "#{network_prefix}.101"}
 # https://github.com/alexellis/k3sup/issues/306
 
 server_script = <<-SHELL
-  export SERVER_IP=#{server_ip}
-  sudo chmod +x #{apps_path}/k3s/shell/server-script.sh
-  #{apps_path}/k3s/shell/server-script.sh
-   
+  . #{common_path}/shell/set-env-var.sh
+  . #{apps_path}/k3s/shell/server-script.sh   
 SHELL
 
 agent_script = <<-SHELL
-  export SERVER_IP=#{server_ip}
-  sudo chmod +x #{apps_path}/k3s/shell/agent-script.sh
-  #{apps_path}/k3s/shell/agent-script.sh
+  . #{common_path}/shell/set-env-var.sh
+  . #{apps_path}/k3s/shell/agent-script.sh
 SHELL
 
 Vagrant.configure("2") do |config|
@@ -85,34 +82,31 @@ Vagrant.configure("2") do |config|
   
     server.vm.provision "helm", type: "shell", inline: <<-SHELL
     sudo chmod +x #{apps_path}/helm/shell/deploy-helm.sh
-    #{apps_path}/helm/shell/deploy-helm.sh
+    . #{apps_path}/helm/shell/deploy-helm.sh
     SHELL
 
     server.vm.provision "metallb-install", type: "shell", inline: <<-SHELL
-    export APP_PATH=#{apps_path}
-    export LOADBALANCER_RANGE=#{load_balancer_range}
+    . #{common_path}/shell/set-env-var.sh
     echo "RANGE metallb : $LOADBALANCER_RANGE"
     sudo chmod +x $APP_PATH/metallb/shell/deploy-metallb.sh
-    $APP_PATH/metallb/shell/deploy-metallb.sh
+    . $APP_PATH/metallb/shell/deploy-metallb.sh
 SHELL
 
 server.vm.provision "jenkins", type: "shell", inline: <<-SHELL
-    export JENKINS_IP=#{network_prefix}.200
-    export APP_PATH=#{apps_path}
+    . #{common_path}/shell/set-env-var.sh
     sudo chmod +x $APP_PATH/jenkins/shell/deploy-jenkins.sh
-    $APP_PATH/jenkins/shell/deploy-jenkins.sh
+    . $APP_PATH/jenkins/shell/deploy-jenkins.sh
 
   SHELL
 
 server.vm.provision "backup-jenkins", type: "shell", inline: <<-SHELL
-    export APP_PATH=#{apps_path}
-    $APP_PATH/jenkins/shell/backup-jenkins.sh
+    . #{common_path}/shell/set-env-var.sh
+    . $APP_PATH/jenkins/shell/backup-jenkins.sh
 SHELL
 server.vm.provision "graylog", type: "shell", inline: <<-SHELL
-    export GRAYLOG_IP=#{network_prefix}.250
-    export APP_PATH=#{apps_path}
+    . #{common_path}/shell/set-env-var.sh
     sudo chmod +x $APP_PATH/graylog/shell/deploy-graylog.sh
-    $APP_PATH/graylog/shell/deploy-graylog.sh
+    . $APP_PATH/graylog/shell/deploy-graylog.sh
   
 SHELL
 
@@ -125,9 +119,7 @@ SHELL
 SHELL
 
 server.vm.provision "elk", type: "shell", inline: <<-SHELL
-  export APP_PATH=#{apps_path}
-  sudo chmod +x $APP_PATH/elk/shell/deploy-elk.sh
-  export NETWORK_PREFIX=#{network_prefix}
+  #{common_path}/shell/set_env_var.sh
   echo "prefix network dans vagrantfile : $NETWORK_PREFIX"
   $APP_PATH/elk/shell/deploy-elk.sh
 

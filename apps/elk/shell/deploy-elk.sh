@@ -1,6 +1,6 @@
 #!/bin/bash
-sudo chmod +x ./set-env-var.sh
-. ./set-env-var.sh
+sudo chmod +x /vagrant/common/shell/set-env-var.sh
+. /vagrant/common/shell/set-env-var.sh
 # echo "suppression de l'ancienne stack"
 # kubectl delete namespace elastic-system
  
@@ -15,6 +15,7 @@ echo "📦 Déploiement de la stack Kibana avec IP $KIBANA_IP"
 export KIBANA_PATH=/vagrant/apps/elk/yaml
 
 envsubst < $KIBANA_PATH/elk-stack.yaml | kubectl apply -f -
+sudo kubectl config set-context --current --namespace elastic-system
 
 echo "attente que tous les pods soient prets"
 echo "attente que les pods soient ready"
@@ -24,7 +25,6 @@ kubectl wait --for=condition=ready pod -l app=kibana -n elastic-system --timeout
 kubectl wait --for=condition=ready pod -l app=logstash -n elastic-system --timeout=300s
 
 echo "🎉 Stack ELK déployé automatiquement avec Kibana, Beats et Logstash configurés"
-sudo kubectl config set-context --current --namespace elastic-system
 # import des dashboard
 kubectl apply -f $KIBANA_PATH/filebeat-import-dashboard-job.yaml
 kubectl apply -f $KIBANA_PATH/metricbeat-import-dashboard-job.yaml

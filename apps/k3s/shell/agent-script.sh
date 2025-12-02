@@ -1,5 +1,8 @@
 #agent-script.sh
-    sudo -i
+    # sudo -i
+    sudo chmod +x /vagrant/common/shell/set-env-var.sh
+    . /vagrant/common/shell/set-env-var.sh
+
     echo "K3s IP server : $SERVER_IP"
     apk add curl
     if [ -f /usr/local/bin/k3s-agent-uninstall.sh ]; then
