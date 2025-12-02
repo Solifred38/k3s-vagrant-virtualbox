@@ -38,3 +38,6 @@ kubectl delete pod -n "$NAMESPACE" "$POD_NAME" --wait=true >/dev/null
 # attente 10s
 echo "attente de relance de jenkins"
 sleep 10
+echo "attente que le pod soit pret"
+kubectl wait --for=condition=ready pod/jenkins-0 -n jenkins --timeout=200s
+echo "jenkins est pret"

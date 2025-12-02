@@ -81,20 +81,16 @@ Vagrant.configure("2") do |config|
     server.vm.provision "cluster-k3s", type: "shell", inline: server_script
   
     server.vm.provision "helm", type: "shell", inline: <<-SHELL
-    sudo chmod +x #{apps_path}/helm/shell/deploy-helm.sh
     . #{apps_path}/helm/shell/deploy-helm.sh
     SHELL
 
     server.vm.provision "metallb-install", type: "shell", inline: <<-SHELL
     . #{common_path}/shell/set-env-var.sh
-    echo "RANGE metallb : $LOADBALANCER_RANGE"
-    sudo chmod +x $APP_PATH/metallb/shell/deploy-metallb.sh
     . $APP_PATH/metallb/shell/deploy-metallb.sh
 SHELL
 
 server.vm.provision "jenkins", type: "shell", inline: <<-SHELL
     . #{common_path}/shell/set-env-var.sh
-    sudo chmod +x $APP_PATH/jenkins/shell/deploy-jenkins.sh
     . $APP_PATH/jenkins/shell/deploy-jenkins.sh
 
   SHELL
@@ -105,33 +101,24 @@ server.vm.provision "backup-jenkins", type: "shell", inline: <<-SHELL
 SHELL
 server.vm.provision "graylog", type: "shell", inline: <<-SHELL
     . #{common_path}/shell/set-env-var.sh
-    sudo chmod +x $APP_PATH/graylog/shell/deploy-graylog.sh
     . $APP_PATH/graylog/shell/deploy-graylog.sh
   
 SHELL
 
   server.vm.provision "restore-jenkins", type: "shell", inline: <<-SHELL
-    export APP_PATH=#{apps_path}
+  . #{common_path}/shell/set-env-var.sh
     $APP_PATH/jenkins/shell/restore-jenkins.sh
-    echo "attente que le pod soit pret"
-    kubectl wait --for=condition=ready pod/jenkins-0 -n jenkins --timeout=200s
-    echo "jenkins est pret"
 SHELL
 
 server.vm.provision "elk", type: "shell", inline: <<-SHELL
-  #{common_path}/shell/set_env_var.sh
+  . #{common_path}/shell/set-env-var.sh
   echo "prefix network dans vagrantfile : $NETWORK_PREFIX"
-  $APP_PATH/elk/shell/deploy-elk.sh
+  . $APP_PATH/elk/shell/deploy-elk.sh
 
 SHELL
 server.vm.provision "dashboard", type: "shell", inline: <<-SHELL
-  export APP_PATH=#{apps_path}
-  sudo chmod +x $APP_PATH/dashboard/shell/deploy-dashboard.sh
-  export NETWORK_PREFIX=#{network_prefix}
-  export IPDASH=#{network_prefix}.201
-  echo "IPDASH : $IPDASH"
-  # echo "prefix network dans vagrantfile : $NETWORK_PREFIX"
-  $APP_PATH/dashboard/shell/deploy-dashboard.sh
+  . #{common_path}/shell/set-env-var.sh
+  . $APP_PATH/dashboard/shell/deploy-dashboard.sh
 SHELL
 
   end
