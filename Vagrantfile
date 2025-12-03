@@ -57,11 +57,17 @@ agents = { "agent1" => "#{network_prefix}.101"}
 # https://github.com/alexellis/k3sup/issues/306
 
 server_script = <<-SHELL
+  apk add dos2unix
+  dos2unix #{common_path}/shell/set-env-var.sh
+  dos2unix #{apps_path}/k3s/shell/server-script.sh   
   . #{common_path}/shell/set-env-var.sh
   . #{apps_path}/k3s/shell/server-script.sh   
 SHELL
 
 agent_script = <<-SHELL
+  apk add dos2unix
+  dos2unix #{common_path}/shell/set-env-var.sh
+  dos2unix #{apps_path}/k3s/shell/agent-script.sh
   . #{common_path}/shell/set-env-var.sh
   . #{apps_path}/k3s/shell/agent-script.sh
 SHELL
