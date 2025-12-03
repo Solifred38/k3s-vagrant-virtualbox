@@ -1,8 +1,8 @@
-# metricbeat-import-dashboards-final.yaml
+# metricbeat-setup-complet.yaml
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: metricbeat-import-dashboards-final
+  name: metricbeat-setup-complet
   namespace: elastic-system
 spec:
   backoffLimit: 6
@@ -15,22 +15,23 @@ spec:
         args:
           - |
             KIBANA_SVC="http://kibana.elastic-system:5601"
+            ES_SVC="http://elasticsearch.elastic-system:9200"
             
             echo "1. Attente de la disponibilité de Kibana à $KIBANA_SVC..."
-            # Boucle d'attente (avec l'adresse correcte)
+            # Boucle d'attente
             until curl -s -f "$KIBANA_SVC/api/status"; do
               echo "Kibana ($KIBANA_SVC) n'est pas prêt. Attente de 5s..."
               sleep 5
             done
             
-            echo "2. Kibana est prêt. Lancement de l'importation vers $KIBANA_SVC..."
+            echo "2. Kibana est prêt. Lancement du setup complet (Templates + Dashboards)..."
             
-            # --- CORRECTION ICI : On passe l'hôte directement à la commande setup ---
-            metricbeat setup --dashboards -E setup.kibana.host="$KIBANA_SVC"
+            # Commande de setup complète : utilise l'hôte Kibana et les hôtes Elasticsearch
+            metricbeat setup -E setup.kibana.host="$KIBANA_SVC" -E output.elasticsearch.hosts='["'$ES_SVC'"]'
             
         env:
-          # Nous gardons la variable ELASTICSEARCH_HOSTS si elle est nécessaire pour les templates
-        - name: ELASTICSEARCH_HOSTS
-          value: '["http://elasticsearch.elastic-system:9200"]' 
+          # Les variables d'environnement ne sont plus essentielles ici, mais peuvent aider au debug
+        - name: ELASTICSEARCH_HOSTS 
+          value: '["http://elasticsearch.elastic-system:9200"]'
           
       restartPolicy: OnFailure

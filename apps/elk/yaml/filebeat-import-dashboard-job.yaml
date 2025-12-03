@@ -1,37 +1,37 @@
-# filebeat-import-dashboards-final.yaml
+# filebeat-setup-complet.yaml
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: filebeat-import-dashboards-final
-  namespace: elastic-system # Le namespace où se trouve Kibana
+  name: filebeat-setup-complet
+  namespace: elastic-system
 spec:
   backoffLimit: 6
   template:
     spec:
-      # Nous utilisons le même ServiceAccount par défaut que pour Metricbeat
       containers:
       - name: filebeat-setup
-        image: docker.elastic.co/beats/filebeat:8.15.3 # Assurez-vous de la bonne version
+        image: docker.elastic.co/beats/filebeat:8.15.3
         command: ["/bin/bash", "-c"]
         args:
           - |
             KIBANA_SVC="http://kibana.elastic-system:5601"
+            ES_SVC="http://elasticsearch.elastic-system:9200"
             
             echo "1. Attente de la disponibilité de Kibana à $KIBANA_SVC..."
-            # Boucle d'attente : vérifie l'API de Kibana toutes les 5 secondes
+            # Boucle d'attente
             until curl -s -f "$KIBANA_SVC/api/status"; do
               echo "Kibana ($KIBANA_SVC) n'est pas prêt. Attente de 5s..."
               sleep 5
             done
             
-            echo "2. Kibana est prêt. Lancement de l'importation vers $KIBANA_SVC..."
+            echo "2. Kibana est prêt. Lancement du setup complet (Templates + Dashboards)..."
             
-            # --- CORRECTION : Définition de l'hôte Kibana avec -E ---
-            filebeat setup --dashboards -E setup.kibana.host="$KIBANA_SVC"
+            # Commande de setup complète
+            filebeat setup -E setup.kibana.host="$KIBANA_SVC" -E output.elasticsearch.hosts='["'$ES_SVC'"]'
             
         env:
-          # Configuration Elasticsearch (pour l'importation des Index Templates)
+          # Les variables d'environnement ne sont plus essentielles ici, mais peuvent aider au debug
         - name: ELASTICSEARCH_HOSTS
-          value: '["http://elasticsearch.elastic-system:9200"]' # Adaptez si le service ES est différent
+          value: '["http://elasticsearch.elastic-system:9200"]'
           
       restartPolicy: OnFailure

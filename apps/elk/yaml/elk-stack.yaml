@@ -273,14 +273,11 @@ metadata:
 data:
   metricbeat.yml: |-
     metricbeat.modules:
-      - module: system
-        period: 10s
-        metricsets:
-          - process
-          - process_summary
-        processes: ['.*']
-        process.include_fields: ["name", "pid"]
-        hostfs: /hostfs
+    - module: system
+      metricsets: ["cpu", "load", "memory", "network", "filesystem", "diskio", "process", "process_summary"]
+      enabled: true  # <-- DOIT ÊTRE À TRUE
+      period: 10s
+      hostfs: "/hostfs"  # Pour collecter les métriques du nœud hôte
 
     output.elasticsearch:
       hosts: ["http://elasticsearch:9200"]
