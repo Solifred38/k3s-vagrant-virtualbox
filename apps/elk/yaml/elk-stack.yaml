@@ -273,11 +273,33 @@ metadata:
 data:
   metricbeat.yml: |-
     metricbeat.modules:
+    # ------------------------------------------------------------------
+    # BLOC 1 : Module SYSTEM (Stable - sans 'service' ni 'dbus')
+    # ------------------------------------------------------------------
     - module: system
-      metricsets: ["cpu", "load", "memory", "network", "filesystem", "diskio", "process", "process_summary"]
-      enabled: true  # <-- DOIT ÊTRE À TRUE
+      # Retrait de 'service' pour éviter l'erreur D-Bus
+      metricsets: ["cpu", "load", "memory", "network", "filesystem", "diskio", "process", "process_summary"] 
+      enabled: true
       period: 10s
-      hostfs: "/hostfs"  # Pour collecter les métriques du nœud hôte
+      hostfs: "/hostfs"
+
+    # ------------------------------------------------------------------
+    # BLOC 2 : Module KUBERNETES (Pour les métriques du cluster)
+    # ------------------------------------------------------------------
+    - module: kubernetes
+      metricsets:
+        - node
+        - system
+        - pod
+        - container
+        - volume
+        # Le metricset 'service' est retiré
+      enabled: true
+      period: 10s
+      # Utilise la variable KUBERNETES_HOST que nous définissons ci-dessous
+      hosts: ["https://${KUBERNETES_HOST}:10250", "https://${KUBERNETES_HOST}:10255"] 
+      ssl.verification_mode: none
+      in_cluster: true
 
     output.elasticsearch:
       hosts: ["http://elasticsearch:9200"]
@@ -308,6 +330,11 @@ spec:
           args: ["-e"]
           securityContext:
             privileged: true
+          env: # ⬅️ AJOUT CRITIQUE : Résout l'erreur 'empty host'
+            - name: KUBERNETES_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
           volumeMounts:
             - name: config
               mountPath: /usr/share/metricbeat/metricbeat.yml
@@ -318,6 +345,7 @@ spec:
             - name: hostfs
               mountPath: /hostfs
               readOnly: true
+            # ❌ Suppression du montage 'dbus'
       volumes:
         - name: config
           configMap:
@@ -328,6 +356,7 @@ spec:
         - name: hostfs
           hostPath:
             path: /
+        # ❌ Suppression du volume 'dbus'
 ---
 apiVersion: v1
 kind: ConfigMap
