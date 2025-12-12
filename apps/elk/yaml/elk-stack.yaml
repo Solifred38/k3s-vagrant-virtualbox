@@ -18,6 +18,13 @@ spec:
       labels:
         app: elasticsearch
     spec:
+      # CORRECTION 1 : Init Container pour régler vm.max_map_count (requis par ES)
+      initContainers:
+      - name: increase-vm-max-map
+        image: busybox
+        command: ["sysctl", "-w", "vm.max_map_count=262144"]
+        securityContext:
+          privileged: true
       containers:
         - name: elasticsearch
           image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
@@ -28,11 +35,20 @@ spec:
               value: "single-node"
             - name: xpack.security.enabled
               value: "false"
+            # CORRECTION 2 : Définir le tas Java (ES_JAVA_OPTS) - 2Go minimum recommandés pour ES 8.x
+            - name: ES_JAVA_OPTS
+              value: "-Xms2048m -Xmx2048m" 
+          # CORRECTION 3 : Définir les requêtes/limites de ressources K8s (obligatoire)
+          resources:
+            limits:
+              memory: 4Gi # Laisser un peu de marge au-delà des 2Go Java
+            requests:
+              memory: 3Gi
           readinessProbe:
             httpGet:
               path: /
               port: 9200
-            initialDelaySeconds: 15
+            initialDelaySeconds: 25 # Augmenter l'attente initiale
             periodSeconds: 5
 ---
 apiVersion: v1
@@ -92,13 +108,14 @@ metadata:
   name: kibana
   namespace: elastic-system
 spec:
-  type: LoadBalancer
-  loadBalancerIP: ${KIBANA_IP}
+  # CORRECTION 4 : Changement pour NodePort (accès par IP du serveur K3s + port NodePort)
+  type: NodePort 
   selector:
     app: kibana
   ports:
     - port: 5601
       targetPort: 5601
+# REMARQUE : loadBalancerIP: ${KIBANA_IP} a été supprimé
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -296,7 +313,7 @@ data:
       enabled: true
       period: 10s
       # ⬅️ Changement CLÉ : Utilisation du nom du nœud, qui est souvent mieux résolu que 127.0.0.1
-      hosts: ["https://${NODE_NAME}:10250"] 
+      hosts: ["https://127.0.0.1:10250"] 
       ssl.verification_mode: none
       in_cluster: true
 
