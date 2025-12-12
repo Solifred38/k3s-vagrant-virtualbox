@@ -284,7 +284,7 @@ data:
       hostfs: "/hostfs"
 
     # ------------------------------------------------------------------
-    # BLOC 2 : Module KUBERNETES (Pour les métriques du cluster)
+    # BLOC 2 : Module KUBERNETES (Utilisation du NODE_NAME)
     # ------------------------------------------------------------------
     - module: kubernetes
       metricsets:
@@ -293,11 +293,10 @@ data:
         - pod
         - container
         - volume
-        # Le metricset 'service' est retiré
       enabled: true
       period: 10s
-      # Utilise la variable KUBERNETES_HOST que nous définissons ci-dessous
-      hosts: ["https://${KUBERNETES_HOST}:10250", "https://${KUBERNETES_HOST}:10255"] 
+      # ⬅️ Changement CLÉ : Utilisation du nom du nœud, qui est souvent mieux résolu que 127.0.0.1
+      hosts: ["https://${NODE_NAME}:10250"] 
       ssl.verification_mode: none
       in_cluster: true
 
@@ -330,11 +329,11 @@ spec:
           args: ["-e"]
           securityContext:
             privileged: true
-          env: # ⬅️ AJOUT CRITIQUE : Résout l'erreur 'empty host'
-            - name: KUBERNETES_HOST
+          env: # ⬅️ AJOUT CRITIQUE : Utilisation de spec.nodeName (plus fiable que status.hostIP)
+            - name: NODE_NAME
               valueFrom:
                 fieldRef:
-                  fieldPath: status.hostIP
+                  fieldPath: spec.nodeName
           volumeMounts:
             - name: config
               mountPath: /usr/share/metricbeat/metricbeat.yml
@@ -345,7 +344,6 @@ spec:
             - name: hostfs
               mountPath: /hostfs
               readOnly: true
-            # ❌ Suppression du montage 'dbus'
       volumes:
         - name: config
           configMap:
@@ -356,7 +354,6 @@ spec:
         - name: hostfs
           hostPath:
             path: /
-        # ❌ Suppression du volume 'dbus'
 ---
 apiVersion: v1
 kind: ConfigMap

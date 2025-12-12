@@ -1,5 +1,7 @@
 #deploy-metallb.sh
 #!/bin/bash
+sudo chmod +x /vagrant/common/shell/set-env-var.sh
+. /vagrant/common/shell/set-env-var.sh
 sudo apk add envsubst -f
 kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.8/config/manifests/metallb-native.yaml
 # attente de création des ressources dans metallb-system
