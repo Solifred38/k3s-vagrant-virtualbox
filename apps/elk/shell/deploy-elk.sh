@@ -10,7 +10,7 @@ sudo chmod +x /vagrant/common/shell/set-env-var.sh
 # echo "installation des CRD (custom resourses definition) et déploiement de l'ElasticOperator"
 # kubectl apply -f https://download.elastic.co/downloads/eck/2.10.0/crds.yaml
 # kubectl apply -f https://download.elastic.co/downloads/eck/2.10.0/operator.yaml
-echo "📦 Déploiement de la stack Kibana avec IP $KIBANA_IP"
+# echo "📦 Déploiement de la stack Kibana avec IP $KIBANA_IP"
 
 export KIBANA_PATH=/vagrant/apps/elk/yaml
 

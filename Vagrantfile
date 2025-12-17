@@ -42,7 +42,6 @@ def network_prefix
 end
 
 # quelques variables d'environnement
-common_path="/vagrant/common"
 apps_path="/vagrant/apps"
 # 📦 IPs dynamiques
 server_ip = "#{network_prefix}.100"
@@ -58,17 +57,13 @@ agents = {}
 
 server_script = <<-SHELL
   apk add dos2unix
-  dos2unix #{common_path}/shell/set-env-var.sh
   dos2unix #{apps_path}/k3s/shell/server-script.sh   
-  . #{common_path}/shell/set-env-var.sh
   . #{apps_path}/k3s/shell/server-script.sh   
 SHELL
 
 agent_script = <<-SHELL
   apk add dos2unix
-  dos2unix #{common_path}/shell/set-env-var.sh
   dos2unix #{apps_path}/k3s/shell/agent-script.sh
-  . #{common_path}/shell/set-env-var.sh
   . #{apps_path}/k3s/shell/agent-script.sh
 SHELL
 
@@ -91,40 +86,31 @@ Vagrant.configure("2") do |config|
     SHELL
 
     server.vm.provision "metallb-install", type: "shell", inline: <<-SHELL
-    . #{common_path}/shell/set-env-var.sh
-    . $APP_PATH/metallb/shell/deploy-metallb.sh
+    . #{apps_path}/metallb/shell/deploy-metallb.sh
 SHELL
 
 server.vm.provision "jenkins", type: "shell", inline: <<-SHELL
-    . #{common_path}/shell/set-env-var.sh
-    . $APP_PATH/jenkins/shell/deploy-jenkins.sh
+    . #{apps_path}/jenkins/shell/deploy-jenkins.sh
 
   SHELL
 
 server.vm.provision "backup-jenkins", type: "shell", inline: <<-SHELL
-    . #{common_path}/shell/set-env-var.sh
-    . $APP_PATH/jenkins/shell/backup-jenkins.sh
+    . #{apps_path}/jenkins/shell/backup-jenkins.sh
 SHELL
 server.vm.provision "graylog", type: "shell", inline: <<-SHELL
-    . #{common_path}/shell/set-env-var.sh
-    . $APP_PATH/graylog/shell/deploy-graylog.sh
+    . #{apps_path}/graylog/shell/deploy-graylog.sh
   
 SHELL
 
   server.vm.provision "restore-jenkins", type: "shell", inline: <<-SHELL
-  . #{common_path}/shell/set-env-var.sh
-    $APP_PATH/jenkins/shell/restore-jenkins.sh
+    #{apps_path}/jenkins/shell/restore-jenkins.sh
 SHELL
 
 server.vm.provision "elk", type: "shell", inline: <<-SHELL
-  . #{common_path}/shell/set-env-var.sh
-  echo "prefix network dans vagrantfile : $NETWORK_PREFIX"
-  . $APP_PATH/elk/shell/deploy-elk.sh
-
+  . #{apps_path}/elk/shell/deploy-elk.sh
 SHELL
 server.vm.provision "dashboard", type: "shell", inline: <<-SHELL
-  . #{common_path}/shell/set-env-var.sh
-  . $APP_PATH/dashboard/shell/deploy-dashboard.sh
+  . #{apps_path}/dashboard/shell/deploy-dashboard.sh
 SHELL
 
   end

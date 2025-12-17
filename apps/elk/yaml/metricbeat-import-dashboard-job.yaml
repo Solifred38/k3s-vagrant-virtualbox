@@ -1,37 +1,37 @@
-# metricbeat-setup-complet.yaml
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: metricbeat-setup-complet
   namespace: elastic-system
+  labels: 
+    app: import-dashboard
 spec:
-  backoffLimit: 6
+  # On remonte le backoff pour laisser Kubernetes retenter si Kibana est momentanément saturé
+  backoffLimit: 5
   template:
     spec:
       containers:
       - name: metricbeat-setup
         image: docker.elastic.co/beats/metricbeat:8.15.3
-        command: ["/bin/bash", "-c"]
+        command: ["/usr/share/metricbeat/metricbeat"]
         args:
-          - |
-            KIBANA_SVC="http://kibana.elastic-system:5601"
-            ES_SVC="http://elasticsearch.elastic-system:9200"
-            
-            echo "1. Attente de la disponibilité de Kibana à $KIBANA_SVC..."
-            # Boucle d'attente
-            until curl -s -f "$KIBANA_SVC/api/status"; do
-              echo "Kibana ($KIBANA_SVC) n'est pas prêt. Attente de 5s..."
-              sleep 5
-            done
-            
-            echo "2. Kibana est prêt. Lancement du setup complet (Templates + Dashboards)..."
-            
-            # Commande de setup complète : utilise l'hôte Kibana et les hôtes Elasticsearch
-            metricbeat setup -E setup.kibana.host="$KIBANA_SVC" -E output.elasticsearch.hosts='["'$ES_SVC'"]'
-            
-        env:
-          # Les variables d'environnement ne sont plus essentielles ici, mais peuvent aider au debug
-        - name: ELASTICSEARCH_HOSTS 
-          value: '["http://elasticsearch.elastic-system:9200"]'
-          
+          - "setup"
+          - "--dashboards"
+          - "-E"
+          - "setup.kibana.host=http://kibana.elastic-system:5601"
+          # On limite l'importation au seul module "system" pour éviter le timeout 503
+          - "-E"
+          - "setup.dashboards.modules=['system']"
+          - "-E"
+          - "setup.kibana.timeout=120s"
+          - "-E"
+          - "output.elasticsearch.hosts=['http://elasticsearch.elastic-system:9200']"
+          - "-E"
+          - "setup.template.enabled=false"
+          - "-E"
+          - "setup.ilm.enabled=false"
+          - "-E"
+          - "data_stream.enabled=false"
+      # On change en OnFailure pour que le pod ne soit pas supprimé immédiatement en cas de crash
       restartPolicy: OnFailure
+      serviceAccountName: metricbeat

@@ -18,13 +18,6 @@ spec:
       labels:
         app: elasticsearch
     spec:
-      # CORRECTION 1 : Init Container pour régler vm.max_map_count (requis par ES)
-      initContainers:
-      - name: increase-vm-max-map
-        image: busybox
-        command: ["sysctl", "-w", "vm.max_map_count=262144"]
-        securityContext:
-          privileged: true
       containers:
         - name: elasticsearch
           image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
@@ -35,20 +28,11 @@ spec:
               value: "single-node"
             - name: xpack.security.enabled
               value: "false"
-            # CORRECTION 2 : Définir le tas Java (ES_JAVA_OPTS) - 2Go minimum recommandés pour ES 8.x
-            - name: ES_JAVA_OPTS
-              value: "-Xms2048m -Xmx2048m" 
-          # CORRECTION 3 : Définir les requêtes/limites de ressources K8s (obligatoire)
-          resources:
-            limits:
-              memory: 4Gi # Laisser un peu de marge au-delà des 2Go Java
-            requests:
-              memory: 3Gi
           readinessProbe:
             httpGet:
               path: /
               port: 9200
-            initialDelaySeconds: 25 # Augmenter l'attente initiale
+            initialDelaySeconds: 15
             periodSeconds: 5
 ---
 apiVersion: v1
@@ -108,14 +92,14 @@ metadata:
   name: kibana
   namespace: elastic-system
 spec:
-  # CORRECTION 4 : Changement pour NodePort (accès par IP du serveur K3s + port NodePort)
-  type: NodePort 
+  # NodePort pour Kibana
+  type: NodePort
   selector:
     app: kibana
   ports:
     - port: 5601
       targetPort: 5601
-# REMARQUE : loadBalancerIP: ${KIBANA_IP} a été supprimé
+      nodePort: 30000
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -256,6 +240,7 @@ kind: ClusterRole
 metadata:
   name: metricbeat
 rules:
+# Règles pour l'API Kubernetes standard
 - apiGroups: [""]
   resources:
   - nodes
@@ -268,6 +253,21 @@ rules:
   - daemonsets
   - replicasets
   verbs: ["get", "list", "watch"]
+# Correction RBAC pour Kubelet (403 Forbidden)
+- apiGroups: [""]
+  resources:
+  - nodes/metrics
+  - nodes/proxy
+  - nodes/stats
+  verbs: ["get"]
+# Règle non-ressource pour les endpoints /metrics et /stats/summary
+- nonResourceURLs:
+  - "/metrics"
+  - "/metrics/cadvisor"
+  - "/metrics/resource"
+  - "/stats/summary"
+  verbs:
+  - "get"
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -289,36 +289,48 @@ metadata:
   namespace: elastic-system
 data:
   metricbeat.yml: |-
+    # 🚨 CORRECTION FINALE : Ajout de la section setup pour résoudre l'erreur 400 Bad Request
+    setup.ilm.enabled: false
+    setup.template.enabled: true
+    setup.template.name: "metricbeat-%{[agent.version]}"
+    setup.template.pattern: "metricbeat-*"
+
     metricbeat.modules:
     # ------------------------------------------------------------------
-    # BLOC 1 : Module SYSTEM (Stable - sans 'service' ni 'dbus')
+    # BLOC 1 : Module SYSTEM (Métriques de base uniquement)
     # ------------------------------------------------------------------
     - module: system
-      # Retrait de 'service' pour éviter l'erreur D-Bus
-      metricsets: ["cpu", "load", "memory", "network", "filesystem", "diskio", "process", "process_summary"] 
+      # Process et process_summary ont été retirés pour éviter les erreurs de cgroup V2
+      metricsets: ["cpu", "load", "memory", "network", "filesystem", "diskio"] 
       enabled: true
       period: 10s
-      hostfs: "/hostfs"
+      hostfs: "/hostfs" 
 
     # ------------------------------------------------------------------
-    # BLOC 2 : Module KUBERNETES (Utilisation du NODE_NAME)
+    # BLOC 2 : Module KUBERNETES (Authentification et Adressage corrigés)
     # ------------------------------------------------------------------
     - module: kubernetes
+      # Retrait de 'container' et 'system' pour éviter les erreurs de permission cgroup V2
       metricsets:
         - node
-        - system
         - pod
-        - container
         - volume
       enabled: true
       period: 10s
-      # ⬅️ Changement CLÉ : Utilisation du nom du nœud, qui est souvent mieux résolu que 127.0.0.1
-      hosts: ["https://127.0.0.1:10250"] 
-      ssl.verification_mode: none
+      # Utilisation de l'IP réseau confirmée
+      hosts: ["https://192.168.10.100:10250"] 
+      # Ajout du token bearer pour l'authentification Kubelet (401 Unauthorized résolu)
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
       in_cluster: true
+      # Configuration SSL pour ignorer le certificat auto-signé
+      ssl:
+        verification_mode: none
+        insecure: true
 
     output.elasticsearch:
       hosts: ["http://elasticsearch:9200"]
+      # Doit être défini lorsque ILM est désactivé
+      index: "metricbeat-%{+yyyy.MM.dd}"
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -342,11 +354,12 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: metricbeat
-          image: docker.elastic.co/beats/metricbeat:8.18.0
+          image: docker.elastic.co/beats/metricbeat:8.15.3
           args: ["-e"]
+          # Nécessaire pour les accès cgroup/procfs
           securityContext:
             privileged: true
-          env: # ⬅️ AJOUT CRITIQUE : Utilisation de spec.nodeName (plus fiable que status.hostIP)
+          env: 
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
@@ -359,7 +372,7 @@ spec:
             - name: data
               mountPath: /usr/share/metricbeat/data
             - name: hostfs
-              mountPath: /hostfs
+              mountPath: /hostfs # Maintient le point de montage /hostfs
               readOnly: true
       volumes:
         - name: config
@@ -370,7 +383,7 @@ spec:
           emptyDir: {}
         - name: hostfs
           hostPath:
-            path: /
+            path: / # Monte la racine de l'hôte
 ---
 apiVersion: v1
 kind: ConfigMap
