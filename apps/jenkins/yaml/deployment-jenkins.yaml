@@ -41,16 +41,17 @@ metadata:
   name: jenkins
   namespace: jenkins
 spec:
-  type: LoadBalancer
+  type: NodePort
   ports:
     - port: 8080
       targetPort: 8080
       protocol: TCP
       name: http
+      nodePort: 30001
     - port: 50000
       targetPort: 50000
       protocol: TCP
+      nodePort: 30002
       name: agent
-  loadBalancerIP: ${JENKINS_IP}
   selector:
     app: jenkins

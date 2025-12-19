@@ -1,11 +1,12 @@
 #deploy-jenkins.sh
 sudo apk add envsubst -f
-
+sudo chmod +x /vagrant/common/shell/set-env-var.sh
+. /vagrant/common/shell/set-env-var.sh
 echo "entree dans installation de jenkins"
 #namespace
 kubectl apply -f $APP_PATH/jenkins/yaml/jenkins-namespace.yaml
 # Volume persistant
-mkdir -p /data/jenkins # répertoire local
+sudo mkdir -p /data/jenkins # répertoire local
 echo "creation des volumes"
 kubectl apply -f $APP_PATH/jenkins/yaml/volume-jenkins.yaml
 
