@@ -25,4 +25,4 @@
     echo "alias k=kubectl" >> /home/vagrant/.bashrc
     echo 'if [ -f ~/.bashrc ]; then source ~/.bashrc; fi' >> /home/vagrant/.profile
     chown vagrant:vagrant /home/vagrant/.bashrc /home/vagrant/.profile
-    cat /vagrant/id_rsa.pub >> ~/.ssh/authorized_keys
+    cat /vagrant/id_rsa.pub >> /home/vagrant/.ssh/authorized_keys
