@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: metricbeat-setup-complet
+  namespace: elastic-system
+  labels: 
+    app: import-dashboard
+spec:
+  # On remonte le backoff pour laisser Kubernetes retenter si Kibana est momentanément saturé
+  backoffLimit: 5
+  template:
+    spec:
+      containers:
+      - name: metricbeat-setup
+        image: docker.elastic.co/beats/metricbeat:8.15.3
+        command: ["/usr/share/metricbeat/metricbeat"]
+        args:
+          - "setup"
+          - "--dashboards"
+          - "-E"
+          - "setup.kibana.host=http://kibana.elastic-system:5601"
+          # On limite l'importation au seul module "system" pour éviter le timeout 503
+          - "-E"
+          - "setup.dashboards.modules=['system']"
+          - "-E"
+          - "setup.kibana.timeout=120s"
+          - "-E"
+          - "output.elasticsearch.hosts=['http://elasticsearch.elastic-system:9200']"
+          - "-E"
+          - "setup.template.enabled=false"
+          - "-E"
+          - "setup.ilm.enabled=false"
+          - "-E"
+          - "data_stream.enabled=false"
+      # On change en OnFailure pour que le pod ne soit pas supprimé immédiatement en cas de crash
+      restartPolicy: OnFailure

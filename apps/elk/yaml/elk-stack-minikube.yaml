@@ -1,0 +1,391 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: elastic-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: elasticsearch
+  namespace: elastic-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: elasticsearch
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+    spec:
+      containers:
+        - name: elasticsearch
+          image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+          ports:
+            - containerPort: 9200
+          env:
+            - name: discovery.type
+              value: "single-node"
+            - name: xpack.security.enabled
+              value: "false"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 9200
+            initialDelaySeconds: 15
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+  namespace: elastic-system
+spec:
+  type: ClusterIP
+  selector:
+    app: elasticsearch
+  ports:
+    - port: 9200
+      targetPort: 9200
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kibana
+  namespace: elastic-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kibana
+  template:
+    metadata:
+      labels:
+        app: kibana
+    spec:
+      containers:
+        - name: kibana
+          image: docker.elastic.co/kibana/kibana:8.15.3
+          ports:
+            - containerPort: 5601
+          env:
+            - name: ELASTICSEARCH_HOSTS
+              value: "http://elasticsearch:9200"
+            - name: XPACK_REPORTING_ENABLED
+              value: "false"
+            - name: XPACK_ML_ENABLED
+              value: "false"
+            - name: XPACK_ENCRYPTEDSAVEDOBJECTS_ENABLED
+              value: "false"
+            - name: XPACK_AI_ASSISTANT_ENABLED
+              value: "false"
+          readinessProbe:
+            httpGet:
+              path: /api/status
+              port: 5601
+            initialDelaySeconds: 25
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana
+  namespace: elastic-system
+spec:
+  type: NodePort
+  selector:
+    app: kibana
+  ports:
+    - port: 5601
+      targetPort: 5601
+      nodePort: 30000
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-pipeline
+  namespace: elastic-system
+data:
+  logstash.conf: |
+    input {
+      beats {
+        port => 5044
+      }
+    }
+    output {
+      if [@metadata][beat] == "filebeat" {
+        elasticsearch {
+          hosts => ["http://elasticsearch:9200"]
+          index => "filebeat-%{+YYYY.MM.dd}"
+        }
+      } else if [@metadata][beat] == "metricbeat" {
+        elasticsearch {
+          hosts => ["http://elasticsearch:9200"]
+          index => "metricbeat-%{+YYYY.MM.dd}"
+        }
+      } else {
+        elasticsearch {
+          hosts => ["http://elasticsearch:9200"]
+          index => "logstash-%{+YYYY.MM.dd}"
+        }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logstash
+  namespace: elastic-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: logstash
+  template:
+    metadata:
+      labels:
+        app: logstash
+    spec:
+      containers:
+        - name: logstash
+          image: docker.elastic.co/logstash/logstash:8.15.3
+          ports:
+            - containerPort: 5044
+          volumeMounts:
+            - name: logstash-pipeline
+              mountPath: /usr/share/logstash/pipeline
+      volumes:
+        - name: logstash-pipeline
+          configMap:
+            name: logstash-pipeline
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logstash
+  namespace: elastic-system
+spec:
+  selector:
+    app: logstash
+  ports:
+    - name: beats
+      port: 5044
+      targetPort: 5044
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: filebeat-config
+  namespace: elastic-system
+data:
+  filebeat.yml: |
+    filebeat.inputs:
+      - type: log
+        enabled: true
+        paths:
+          - /var/log/*.log
+    output.logstash:
+      hosts: ["logstash.elastic-system.svc.cluster.local:5044"]
+    setup.ilm.enabled: false
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: filebeat
+  namespace: elastic-system
+spec:
+  selector:
+    matchLabels:
+      app: filebeat
+  template:
+    metadata:
+      labels:
+        app: filebeat
+    spec:
+      containers:
+        - name: filebeat
+          image: docker.elastic.co/beats/filebeat:8.15.3
+          args: ["-e"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: varlog
+              mountPath: /var/log
+            - name: filebeat-config
+              mountPath: /usr/share/filebeat/filebeat.yml
+              subPath: filebeat.yml
+      volumes:
+        - name: varlog
+          hostPath:
+            path: /var/log
+        - name: filebeat-config
+          configMap:
+            name: filebeat-config
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: metricbeat
+  namespace: elastic-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: metricbeat
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "pods", "namespaces", "nodes/metrics", "nodes/proxy", "nodes/stats"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "daemonsets", "replicasets"]
+  verbs: ["get", "list", "watch"]
+- nonResourceURLs: ["/metrics", "/metrics/cadvisor", "/metrics/resource", "/stats/summary"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: metricbeat
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: metricbeat
+subjects:
+- kind: ServiceAccount
+  name: metricbeat
+  namespace: elastic-system
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metricbeat-config
+  namespace: elastic-system
+data:
+  metricbeat.yml: |-
+    setup.ilm.enabled: false
+    setup.template.enabled: true
+    setup.template.name: "metricbeat-%{[agent.version]}"
+    setup.template.pattern: "metricbeat-*"
+
+    metricbeat.modules:
+    - module: system
+      metricsets: ["cpu", "load", "memory", "network", "filesystem", "diskio"] 
+      enabled: true
+      period: 10s
+      hostfs: "/hostfs" 
+
+    - module: kubernetes
+      metricsets: ["node", "pod", "volume"]
+      enabled: true
+      period: 10s
+      # Utilisation dynamique du nom du noeud pour Minikube
+      hosts: ["https://${NODE_NAME}:10250"] 
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      ssl.verification_mode: "none"
+
+    output.elasticsearch:
+      hosts: ["http://elasticsearch:9200"]
+      index: "metricbeat-%{+yyyy.MM.dd}"
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: metricbeat
+  namespace: elastic-system
+spec:
+  selector:
+    matchLabels:
+      k8s-app: metricbeat
+  template:
+    metadata:
+      labels:
+        k8s-app: metricbeat
+    spec:
+      serviceAccountName: metricbeat
+      hostNetwork: true
+      hostPID: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: metricbeat
+          image: docker.elastic.co/beats/metricbeat:8.15.3
+          args: ["-e"]
+          securityContext:
+            privileged: true
+          env: 
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: config
+              mountPath: /usr/share/metricbeat/metricbeat.yml
+              subPath: metricbeat.yml
+              readOnly: true
+            - name: data
+              mountPath: /usr/share/metricbeat/data
+            - name: hostfs
+              mountPath: /hostfs
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: metricbeat-config
+        - name: data
+          emptyDir: {}
+        - name: hostfs
+          hostPath:
+            path: /
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kibana-dashboard
+  namespace: elastic-system
+data:
+  dashboard.json: |
+    {
+      "version": "8.15.3",
+      "objects": [
+        {
+          "type": "dashboard",
+          "id": "system-logs-overview",
+          "attributes": {
+            "title": "System & Logs Overview",
+            "panelsJSON": "[{\"panelIndex\":\"1\",\"type\":\"visualization\",\"id\":\"cpu-usage\"},{\"panelIndex\":\"2\",\"type\":\"visualization\",\"id\":\"memory-usage\"}]",
+            "optionsJSON": "{\"hidePanelTitles\":false}"
+          }
+        }
+      ]
+    }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kibana-import-dashboard
+  namespace: elastic-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: import-dashboard
+          image: curlimages/curl:8.5.0
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "⏳ Attente Kibana..."
+              until curl -s http://kibana:5601/api/status | grep -q 'available'; do
+                sleep 5
+              done
+              echo "✅ Import..."
+              curl -X POST http://kibana:5601/api/saved_objects/_import \
+                -H "kbn-xsrf: true" \
+                --form file=@/dashboard/dashboard.json
+          volumeMounts:
+            - name: dashboard
+              mountPath: /dashboard
+      volumes:
+        - name: dashboard
+          configMap:
+            name: kibana-dashboard
+      restartPolicy: OnFailure
